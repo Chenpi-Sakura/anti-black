@@ -143,7 +143,7 @@ class KafkaConsumer:
 
         return processed
 
-    async def _consume_demo(self, handler: Callable[[Dict[str, Any]], max_messages: int) -> int:
+    async def _consume_demo(self, handler: Callable[[Dict[str, Any]], Any], max_messages: int) -> int:
         """Demo mode consumption - generate mock messages."""
         processed = 0
         mock_messages = self._generate_mock_messages(max_messages)

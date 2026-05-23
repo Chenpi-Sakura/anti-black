@@ -4,7 +4,8 @@ Defines all MongoDB collections and their schemas.
 """
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field, as_dict
+from dataclasses import dataclass, field
+from dataclasses import asdict
 from enum import Enum
 
 
@@ -295,13 +296,13 @@ class Clue:
     risk_label_level1: str
     risk_label_level2: str
     confidence: float
-    classification_source: str
+    classification_source: str = ""
+    source_channel: str = ""
     classification_reason: Optional[str] = None
-    source_channel: str
     source_group_id: Optional[str] = None
     source_author_id: Optional[str] = None
-    raw_text: str
-    cleaned_text: str
+    raw_text: str = ""
+    cleaned_text: str = ""
     entity_list: List[Dict[str, Any]] = field(default_factory=list)
     slang_mappings: List[Dict[str, str]] = field(default_factory=list)
     graph_relations: List[Dict[str, Any]] = field(default_factory=list)
@@ -339,12 +340,12 @@ class Feedback:
     """User feedback for corrections."""
     feedback_id: str
     clue_id: str
-    feedback_type: str  # classification_error/entity_error/normal_message
+    feedback_type: str = ""  # classification_error/entity_error/normal_message
     correct_risk_label_level1: Optional[str] = None
     correct_risk_label_level2: Optional[str] = None
     correct_entities: List[Dict[str, str]] = field(default_factory=list)
     comment: Optional[str] = None
-    operator: str
+    operator: str = ""
     platinum_enrolled: bool = False
     sample_weight: int = 1
     model_update_status: str = "IDLE"
@@ -427,7 +428,7 @@ class ExportTask:
     filters: Dict[str, Any] = field(default_factory=dict)
     export_format: str = "json"
     include_graph_relations: bool = False
-    operator: str
+    operator: str = ""
     status: ExportStatus = ExportStatus.PENDING
     download_url: Optional[str] = None
     expire_at: Optional[datetime] = None

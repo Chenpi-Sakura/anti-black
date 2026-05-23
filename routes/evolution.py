@@ -70,7 +70,7 @@ def get_proposals():
                     {
                         "proposal_id": generate_id("prop"),
                         "proposal_type": "classification_rule",
-                        "title": "新增"内部代下"为诈骗引流强特征词",
+                        "title": '新增"内部代下"为诈骗引流强特征词',
                         "detail": "过去24小时在诈骗引流样本中高频出现",
                         "status": "pending",
                         "created_at": datetime.utcnow().isoformat()
