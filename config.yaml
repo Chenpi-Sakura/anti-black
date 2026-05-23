@@ -1,0 +1,247 @@
+# 黑灰产情报分析Agent系统配置文件
+# All configurable parameters for the system
+
+app:
+  name: "AntiBlack"
+  version: "1.0.0"
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+  # Token budget control
+  token_budget:
+    daily_limit: 1000000
+    alert_threshold: 0.3  # Alert when 30% remaining
+    pause_deep_channel_threshold: 0.1  # Pause deep channel at 10%
+
+# MongoDB Configuration
+mongodb:
+  host: "localhost"
+  port: 27017
+  database: "antiblack"
+  username: "antiblack_app"
+  password: "changeme"
+  auth_source: "admin"
+
+# Kafka Configuration
+kafka:
+  bootstrap_servers: "localhost:9092"
+  consumer_group: "antiblack_pipeline"
+  topics:
+    raw_messages: "raw.messages"
+    cleaned_messages: "cleaned.messages"
+    deep_analysis: "deep.analysis.tasks"
+    image_analysis: "image.analysis.tasks"
+  # Consumer settings
+  consumer:
+    auto_offset_reset: "earliest"
+    enable_auto_commit: true
+    max_poll_records: 100
+  # Producer settings
+  producer:
+    acks: "all"
+    retries: 3
+    batch_size: 16384
+
+# LightRAG Configuration
+lightrag:
+  working_dir: "./rag_storage"
+  # LLM Settings (OpenAI compatible)
+  llm:
+    api_base: "https://api.openai.com/v1"
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4o-mini"
+    max_tokens: 8192
+    temperature: 0.0
+  # Embedding Settings
+  embedding:
+    model: "text-embedding-3-small"
+    dimension: 1536
+    max_token_size: 8192
+  # Storage Backend
+  storage:
+    graph: "Neo4jStorage"
+    vector: "PGVectorStorage"
+    kv: "PGKVStorage"
+    doc_status: "PGDocStatusStorage"
+  # Neo4j Settings
+  neo4j:
+    uri: "bolt://localhost:7687"
+    username: "neo4j"
+    password: "${NEO4J_PASSWORD}"
+  # PostgreSQL Settings (for vector storage)
+  postgresql:
+    host: "localhost"
+    port: 5432
+    user: "antiblack"
+    password: "${POSTGRES_PASSWORD}"
+    database: "antiblack"
+
+# Pipeline Configuration
+pipeline:
+  # Routing threshold (0.0 - 1.0)
+  routing:
+    default_threshold: 0.6
+    token_adjusted_threshold: 0.7  # When token budget low
+  # Light channel (rule-based extraction)
+  light_channel:
+    max_processing_time_ms: 5
+  # Deep channel (LightRAG)
+  deep_channel:
+    max_parallel_workers: 3
+    max_tokens_per_insert: 5000
+  # Collection
+  collection:
+    default_interval_seconds: 900  # 15 minutes
+    max_messages_per_batch: 100
+  # Cleaning
+  cleaning:
+    dedup_window_hours: 24
+    simhash_threshold: 3  # Hamming distance for approximate dedup
+  # Classification
+  classification:
+    rule_confidence_threshold: 0.9
+    embedding_confidence_threshold: 0.6
+    llm_fallback_confidence: 0.6
+
+# Slang Learning Module
+slang_learning:
+  # State machine thresholds
+  thresholds:
+    new_to_observed: 10      # NEW -> OBSERVED
+    observed_to_likely: 20    # OBSERVED -> LIKELY
+    likely_to_confirmed: 50   # LIKELY -> CONFIRMED
+    stable_count: 500         # CONFIRMED -> STABLE
+  # Reject settings
+  reject:
+    silence_days: 30
+    max_retries: 3
+  # Token control
+  token_control:
+    batch_size: 20
+    dynamic_threshold_factor: 1.5  # Multiply threshold when token budget low
+
+# Auto Evolution Module
+auto_evolution:
+  enabled: true
+  # Silver sample collection
+  silver:
+    min_confidence: 0.8
+  # Error book (LLM-as-Judge)
+  error_book:
+    sample_rate: 0.01  # 1% of high-confidence messages
+    judge_model: "gpt-4o"
+  # Retraining
+  retrain:
+    trigger_threshold: 2000
+    test_split_ratio: 0.2
+    min_f1_improvement: 0.02
+  # Schedule
+  schedule:
+    error_book_check_hour: 2  # 2 AM daily
+    retrain_check_interval_hours: 12
+
+# Taxonomy (Risk Classification System)
+taxonomy:
+  version: "taxonomy_v1"
+  categories:
+    - level1_code: "ACCOUNT_TRADE"
+      level1_name: "账号交易"
+      level2_items:
+        - level2_code: "DOUYIN_ACCOUNT_SALE"
+          level2_name: "抖音号买卖"
+        - level2_code: "ACCOUNT_RENTAL"
+          level2_name: "账号租借"
+        - level2_code: "ACCOUNT_TRANSFER"
+          level2_name: "账号转让"
+    - level1_code: "FRAUD_LEADS"
+      level1_name: "诈骗引流"
+      level2_items:
+        - level2_code: "BRUSH_ORDER"
+          level2_name: "刷单引流"
+        - level2_code: "PIG_BUTCHER"
+          level2_name: "杀猪盘"
+        - level2_code: "PART_TIME_FRAUD"
+          level2_name: "兼职诈骗"
+    - level1_code: "TRAFFIC_CHEATING"
+      level1_name: "流量作弊"
+      level2_items:
+        - level2_code: "FAKE_FOLLOWERS"
+          level2_name: "刷粉"
+        - level2_code: "FAKE_LIKES"
+          level2_name: "刷赞"
+        - level2_code: "FAKE_VIEWS"
+          level2_name: "刷播放量"
+    - level1_code: "BLACK_TOOL"
+      level1_name: "黑产工具"
+      level2_items:
+        - level2_code: "PHONE_OTP"
+          level2_name: "接码平台"
+        - level2_code: "BATCH_CONTROL"
+          level2_name: "群控工具"
+    - level1_code: "UNKNOWN"
+      level1_name: "未知/其他"
+      level2_items:
+        - level2_code: "UNCATEGORIZED"
+          level2_name: "未分类"
+
+# Seed Words Configuration
+seed_words:
+  default_source: "preset"
+  effective_ratio_threshold: 0.05  # Effective clue ratio threshold
+  degradation_days: 7
+
+# Channel Configuration
+channels:
+  supported:
+    - platform: "telegram"
+      category: "im"
+      enabled: true
+    - platform: "x"
+      category: "social"
+      enabled: false
+    - platform: "baidu_tieba"
+      category: "social"
+      enabled: false
+    - platform: "douyin"
+      category: "social"
+      enabled: false
+    - platform: "rednote"
+      category: "social"
+      enabled: false
+    - platform: "secondhand"
+      category: "vertical"
+      enabled: false
+    - platform: "zhilian"
+      category: "vertical"
+      enabled: false
+    - platform: "darkweb"
+      category: "vertical"
+      enabled: false
+    - platform: "tech_forum"
+      category: "vertical"
+      enabled: false
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    retention_days: 30
+  health_check:
+    interval_seconds: 60
+    timeout_seconds: 10
+
+# Export Configuration
+export:
+  max_records_per_export: 5000
+  download_url_expiry_hours: 24
+  formats:
+    - "json"
+    - "csv"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./logs/antiblack.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
