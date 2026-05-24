@@ -18,8 +18,8 @@ mongodb:
   host: "localhost"
   port: 27017
   database: "antiblack"
-  username: "antiblack_app"
-  password: "changeme"
+  username: "antiblack"
+  password: "antiblack123"
   auth_source: "admin"
 
 # Kafka Configuration
@@ -42,20 +42,53 @@ kafka:
     retries: 3
     batch_size: 16384
 
-# LightRAG Configuration
+# Ollama Configuration (VLM and Embedding only - LLM uses cloud)
+ollama:
+  enabled: true
+  base_url: "http://localhost:11434"
+  vlm_model: "qwen2-vl:2b"  # Vision language model for image understanding
+  embedding_model: "nomic-embed-text"  # Optional: if using Ollama for embeddings
+
+# Local Models Configuration
+local_models:
+  # Sentence-Transformers for embeddings
+  embedding:
+    model_name: "BAAI/bge-small-zh-v1.5"
+    device: "auto"  # auto, cpu, cuda, mps
+    dimension: 512
+    normalize: true
+
+  # XGBoost classifier (path to trained model)
+  classifier:
+    model_type: "xgboost"  # xgboost or linear
+    model_path: "./models/xgboost_classifier.pkl"
+    label_encoder_path: "./models/label_encoder.pkl"
+
+  # FastText language detection
+  fasttext:
+    model_path: "./models/lid.176.bin"
+    use_rule_fallback: true  # Use rule-based detection if model unavailable
+
+  # OCR (PaddleOCR)
+  ocr:
+    use_angle_cls: true
+    lang: "ch"  # ch, en, japan, korean, chinese_cht
+    device: "cpu"  # cpu, gpu
+
+# LightRAG Configuration (uses cloud LLM)
 lightrag:
   working_dir: "./rag_storage"
-  # LLM Settings (OpenAI compatible)
+  # LLM Settings (OpenAI cloud - for LightRAG and LLM fallback)
   llm:
     api_base: "https://api.openai.com/v1"
     api_key: "${OPENAI_API_KEY}"
     model: "gpt-4o-mini"
     max_tokens: 8192
     temperature: 0.0
-  # Embedding Settings
+  # Embedding Settings (local via sentence-transformers or Ollama)
   embedding:
-    model: "text-embedding-3-small"
-    dimension: 1536
+    model: "BAAI/bge-small-zh-v1.5"  # Local sentence-transformers
+    dimension: 512
     max_token_size: 8192
   # Storage Backend
   storage:
@@ -67,13 +100,13 @@ lightrag:
   neo4j:
     uri: "bolt://localhost:7687"
     username: "neo4j"
-    password: "${NEO4J_PASSWORD}"
+    password: "neo4j123"
   # PostgreSQL Settings (for vector storage)
   postgresql:
     host: "localhost"
     port: 5432
     user: "antiblack"
-    password: "${POSTGRES_PASSWORD}"
+    password: "antiblack123"
     database: "antiblack"
 
 # Pipeline Configuration
