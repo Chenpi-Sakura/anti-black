@@ -11,8 +11,8 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
-    echo "错误: docker-compose 未安装"
+if ! command -v docker compose &> /dev/null; then
+    echo "错误: docker compose 未安装"
     exit 1
 fi
 
@@ -21,7 +21,7 @@ cd "$SCRIPT_DIR"
 
 # 启动服务
 echo "启动数据库服务..."
-docker-compose up -d
+docker compose up -d
 
 echo ""
 echo "===== 服务启动中 ====="
@@ -64,5 +64,5 @@ echo "下一步:"
 echo "  1. 编辑 config.yaml 确认数据库连接配置"
 echo "  2. 运行: conda activate anti-black && python main.py"
 echo ""
-echo "停止服务: docker-compose down"
-echo "查看日志: docker-compose logs -f [service]"
+echo "停止服务: docker compose down"
+echo "查看日志: docker compose logs -f [service]"
