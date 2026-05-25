@@ -45,6 +45,11 @@ RAG-anything/
 .claude/
 rag_storage/
 
+# Trained models (machine-specific)
+models/*.pkl
+models/*.pth
+models/*.bin
+
 # Logs
 *.log
 

@@ -8,6 +8,21 @@ from typing import Any, Dict, Optional
 from dataclasses import dataclass, field
 
 
+def _load_env_file(env_path: str = ".env") -> None:
+    """Load environment variables from .env file if it exists."""
+    if not os.path.exists(env_path):
+        # Try relative to this file's directory
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env_path = os.path.join(base_dir, ".env")
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key] = value
+
+
 @dataclass
 class AppConfig:
     name: str = "AntiBlack"
@@ -92,6 +107,7 @@ class Config:
     def __init__(self, config_path: str = "config.yaml"):
         self.config_path = config_path
         self._config: Dict[str, Any] = {}
+        _load_env_file()  # Load .env file first
         self._load_config()
 
     def _load_config(self) -> None:

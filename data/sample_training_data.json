@@ -1,0 +1,170 @@
+[
+  {
+    "text": "出一批实名抖音号,8+以上粉丝,私信报价",
+    "label": "DOUYIN_ACCOUNT_SALE"
+  },
+  {
+    "text": "大量回收未实名抖音号,价格美丽",
+    "label": "DOUYIN_ACCOUNT_SALE"
+  },
+  {
+    "text": "出小黄车权限抖音号,需要来",
+    "label": "DOUYIN_ACCOUNT_SALE"
+  },
+  {
+    "text": "代实名抖音号,稳定出号",
+    "label": "DOUYIN_ACCOUNT_SALE"
+  },
+  {
+    "text": "长期求租抖音号,日结",
+    "label": "ACCOUNT_RENTAL"
+  },
+  {
+    "text": "租用抖音号,粉丝1w+,有偿",
+    "label": "ACCOUNT_RENTAL"
+  },
+  {
+    "text": "抖音号出租,安全快速",
+    "label": "ACCOUNT_RENTAL"
+  },
+  {
+    "text": "抖音号转让,粉丝5000+,诚心出",
+    "label": "ACCOUNT_TRANSFER"
+  },
+  {
+    "text": "永久转让抖音号,手续齐全",
+    "label": "ACCOUNT_TRANSFER"
+  },
+  {
+    "text": "兼职刷单,一单一结,扫码进群",
+    "label": "BRUSH_ORDER"
+  },
+  {
+    "text": "电商刷单,一单一结,一单5-50元",
+    "label": "BRUSH_ORDER"
+  },
+  {
+    "text": "抖音关注点赞,日入200+,加我",
+    "label": "BRUSH_ORDER"
+  },
+  {
+    "text": "刷单兼职,正规平台,一单8元起",
+    "label": "BRUSH_ORDER"
+  },
+  {
+    "text": "感情骗子,谎称投资诈骗,大家小心",
+    "label": "PIG_BUTCHER"
+  },
+  {
+    "text": "杀猪盘新套路,先谈恋爱后投资",
+    "label": "PIG_BUTCHER"
+  },
+  {
+    "text": "防范杀猪盘,不要轻信网友投资",
+    "label": "PIG_BUTCHER"
+  },
+  {
+    "text": "招打字员,日赚300,押金先交",
+    "label": "PART_TIME_FRAUD"
+  },
+  {
+    "text": "兼职录入员,在家可做,收费500",
+    "label": "PART_TIME_FRAUD"
+  },
+  {
+    "text": "高薪兼职,先交培训费,退款不退",
+    "label": "PART_TIME_FRAUD"
+  },
+  {
+    "text": "抖音快手刷粉,1000粉只需50元",
+    "label": "FAKE_FOLLOWERS"
+  },
+  {
+    "text": "全网最低价刷粉,安全不封号",
+    "label": "FAKE_FOLLOWERS"
+  },
+  {
+    "text": "专业刷粉,真实粉丝,永久不掉",
+    "label": "FAKE_FOLLOWERS"
+  },
+  {
+    "text": "抖音刷赞,1元100赞,量大优惠",
+    "label": "FAKE_LIKES"
+  },
+  {
+    "text": "快手刷赞,安全快速,包售后",
+    "label": "FAKE_LIKES"
+  },
+  {
+    "text": "刷赞自助下单,永久有效",
+    "label": "FAKE_LIKES"
+  },
+  {
+    "text": "视频播放量提升,1000播放只要5元",
+    "label": "FAKE_VIEWS"
+  },
+  {
+    "text": "专业刷播放量,真人一比一",
+    "label": "FAKE_VIEWS"
+  },
+  {
+    "text": "短视频播放量代刷,当日见效",
+    "label": "FAKE_VIEWS"
+  },
+  {
+    "text": "接码平台,抖音快手验证码,稳定在线",
+    "label": "PHONE_OTP"
+  },
+  {
+    "text": "专业接码,大量靓号,支持语音验证码",
+    "label": "PHONE_OTP"
+  },
+  {
+    "text": "最新接码平台,首充10元送20",
+    "label": "PHONE_OTP"
+  },
+  {
+    "text": "群控系统,一台电脑控制100台手机",
+    "label": "BATCH_CONTROL"
+  },
+  {
+    "text": "抖音群控,自动点赞评论,日引流500+",
+    "label": "BATCH_CONTROL"
+  },
+  {
+    "text": "专业群控设备,适用于所有平台",
+    "label": "BATCH_CONTROL"
+  },
+  {
+    "text": "今天天气真好,出门散步",
+    "label": "NORMAL"
+  },
+  {
+    "text": "周末计划去爬山,有人一起吗",
+    "label": "NORMAL"
+  },
+  {
+    "text": "分享一道美食做法,简单易学",
+    "label": "NORMAL"
+  },
+  {
+    "text": "求推荐好看的电影",
+    "label": "NORMAL"
+  },
+  {
+    "text": "今天加班到很晚,累死了",
+    "label": "NORMAL"
+  },
+  {
+    "text": "学习Python编程的第一天",
+    "label": "NORMAL"
+  },
+  {
+    "text": "新买的手机到了,开箱测评",
+    "label": "NORMAL"
+  },
+  {
+    "text": "周末自驾游,风景真美",
+    "label": "NORMAL"
+  }
+]

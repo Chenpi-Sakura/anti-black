@@ -75,11 +75,11 @@ local_models:
 # LightRAG Configuration (uses cloud LLM)
 lightrag:
   working_dir: "./rag_storage"
-  # LLM Settings (OpenAI cloud - for LightRAG and LLM fallback)
+  # LLM Settings (MiniMax OpenAI-compatible API)
   llm:
-    api_base: "https://api.openai.com/v1"
+    api_base: "${LLM_API_BASE}"
     api_key: "${OPENAI_API_KEY}"
-    model: "gpt-4o-mini"
+    model: "${LLM_MODEL}"
     max_tokens: 8192
     temperature: 0.0
   # Embedding Settings (local via sentence-transformers or Ollama)
