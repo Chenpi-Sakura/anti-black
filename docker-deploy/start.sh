@@ -45,7 +45,7 @@ wait_for_service() {
 
 # 等待各服务就绪
 wait_for_service "MongoDB" "docker exec antiblack-mongodb mongosh --quiet --eval \"db.adminCommand('ping')\""
-wait_for_service "Kafka" "docker exec antiblack-kafka kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+wait_for_service "Kafka" "docker exec antiblack-kafka /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
 wait_for_service "Neo4j" "curl -s http://localhost:7474"
 wait_for_service "PostgreSQL" "docker exec antiblack-postgres pg_isready -U antiblack"
 wait_for_service "Redis" "docker exec antiblack-redis redis-cli ping"
