@@ -15,16 +15,13 @@ app:
 
 # MongoDB Configuration
 mongodb:
-  host: "192.168.148.128"
+  host: "${DB_HOST}"
   port: 27017
   database: "antiblack"
-  username: "antiblack"
-  password: "antiblack123"
-  auth_source: "admin"
 
 # Kafka Configuration
 kafka:
-  bootstrap_servers: "192.168.148.128:9092"
+  bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS}"
   consumer_group: "antiblack_pipeline"
   topics:
     raw_messages: "raw.messages"
@@ -98,12 +95,12 @@ lightrag:
     doc_status: "PGDocStatusStorage"
   # Neo4j Settings
   neo4j:
-    uri: "bolt://192.168.148.128:7687"
+    uri: "${NEO4J_URI}"
     username: "neo4j"
     password: "neo4j123"
   # PostgreSQL Settings (for vector storage)
   postgresql:
-    host: "192.168.148.128"
+    host: "${POSTGRES_HOST}"
     port: 5432
     user: "antiblack"
     password: "antiblack123"
