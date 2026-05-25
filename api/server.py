@@ -45,15 +45,15 @@ def create_app() -> Flask:
 
 def _init_services(app: Flask) -> None:
     """Initialize services on app startup."""
-    from services.database import MongoDBService
+    from services.database import PostgreSQLService
 
     try:
-        # Initialize MongoDB
-        db_service = MongoDBService.get_instance()
+        # Initialize PostgreSQL
+        db_service = PostgreSQLService.get_instance()
         app.config['db'] = db_service
-        logger.info("MongoDB service initialized")
+        logger.info("PostgreSQL service initialized")
     except Exception as e:
-        logger.error(f"Failed to initialize MongoDB: {e}")
+        logger.error(f"Failed to initialize PostgreSQL: {e}")
         # Continue anyway for demo mode with mock data
 
 

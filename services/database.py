@@ -1,15 +1,15 @@
 """
-MongoDB Database Service for AntiBlack system.
-Handles all database operations with MongoDB.
+PostgreSQL Database Service for AntiBlack system.
+Handles all database operations with PostgreSQL using psycopg2.
+Uses 'antiblack' schema for AntiBlack tables.
 """
+import json
 import logging
 from typing import Any, Dict, List, Optional
 from datetime import datetime
-from dataclasses import asdict
-import pymongo
-from pymongo import MongoClient
-from pymongo.collection import Collection
-from pymongo.database import Database
+import psycopg2
+from psycopg2 import sql
+from psycopg2.extras import RealDictCursor, Json
 
 from config import get_config
 from models import (
@@ -21,112 +21,342 @@ from models import (
 logger = logging.getLogger(__name__)
 
 
-class MongoDBService:
-    """MongoDB service for all database operations."""
+class PostgreSQLService:
+    """PostgreSQL service for all database operations using antiblack schema."""
 
-    _instance: Optional['MongoDBService'] = None
+    _instance: Optional['PostgreSQLService'] = None
 
-    def __init__(self, connection_string: Optional[str] = None, database: Optional[str] = None):
+    def __init__(self):
         config = get_config()
-        mongo_config = config.mongodb
+        pg_config = config.postgresql
 
-        if connection_string is None:
-            connection_string = mongo_config.uri
-        if database is None:
-            database = mongo_config.database
+        self.host = pg_config.host
+        self.port = pg_config.port
+        self.user = pg_config.user
+        self.password = pg_config.password
+        self.database = pg_config.database
+        self.schema = 'antiblack'
 
-        self.client: MongoClient = MongoClient(connection_string)
-        self.db: Database = self.client[database]
-
-        # Initialize collections
-        self._init_collections()
-
-        # Create indexes
+        self._conn: Optional[psycopg2.extensions.connection] = None
+        self._connect()
+        self._init_schema()
+        self._create_tables()
         self._create_indexes()
 
-    def _init_collections(self) -> None:
-        """Initialize all collections."""
-        self.entities: Collection = self.db['entities']
-        self.message_refs: Collection = self.db['message_refs']
-        self.slang_mappings: Collection = self.db['slang_mappings']
-        self.slang_candidates: Collection = self.db['slang_candidates']
-        self.queries: Collection = self.db['queries']
-        self.clues: Collection = self.db['clues']
-        self.feedback: Collection = self.db['feedback']
-        self.seed_words: Collection = self.db['seed_words']
-        self.proposals: Collection = self.db['proposals']
-        self.exports: Collection = self.db['exports']
-        self.channels: Collection = self.db['channels']
-        self.metrics: Collection = self.db['metrics']
-        self.auto_evolution: Collection = self.db['auto_evolution']
+    def _connect(self) -> None:
+        """Establish database connection."""
+        self._conn = psycopg2.connect(
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            database=self.database,
+            cursor_factory=RealDictCursor
+        )
+        self._conn.autocommit = True
+        logger.info(f"Connected to PostgreSQL {self.host}:{self.port}/{self.database}")
+
+    def _get_cursor(self):
+        """Get a new cursor."""
+        return self._conn.cursor()
+
+    def _init_schema(self) -> None:
+        """Create antiblack schema if not exists."""
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                sql.Identifier(self.schema)))
+            logger.info(f"Schema '{self.schema}' ready")
+
+    def _create_tables(self) -> None:
+        """Create all tables in antiblack schema."""
+        schema = self.schema
+
+        table_defs = [
+            # entities table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.entities (
+                entity_id VARCHAR(255) PRIMARY KEY,
+                entity_type VARCHAR(50) NOT NULL,
+                raw_value TEXT NOT NULL,
+                normalized_value TEXT,
+                first_seen TIMESTAMP DEFAULT NOW(),
+                last_seen TIMESTAMP DEFAULT NOW(),
+                occurrence_count INTEGER DEFAULT 0,
+                source_channel VARCHAR(50),
+                risk_labels JSONB DEFAULT '[]',
+                metadata JSONB DEFAULT '{{}}',
+                UNIQUE(entity_type, raw_value)
+            )
+            """,
+
+            # message_refs table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.message_refs (
+                ref_id VARCHAR(255) PRIMARY KEY,
+                entity_id VARCHAR(255) NOT NULL,
+                message_id VARCHAR(255) NOT NULL,
+                source VARCHAR(50),
+                context_snippet TEXT,
+                risk_label VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # slang_mappings table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.slang_mappings (
+                mapping_id VARCHAR(255) PRIMARY KEY,
+                slang_raw VARCHAR(255) UNIQUE NOT NULL,
+                meaning TEXT NOT NULL,
+                regex_pattern TEXT,
+                source VARCHAR(50) DEFAULT 'preset',
+                verified BOOLEAN DEFAULT FALSE,
+                confidence REAL DEFAULT 1.0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # slang_candidates table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.slang_candidates (
+                candidate_word VARCHAR(255) PRIMARY KEY,
+                contexts JSONB DEFAULT '[]',
+                occurrence_count INTEGER DEFAULT 0,
+                status VARCHAR(50) DEFAULT 'NEW',
+                inference_count INTEGER DEFAULT 0,
+                reject_until TIMESTAMP,
+                regex_pattern TEXT,
+                meaning TEXT,
+                source_channel VARCHAR(50),
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # queries table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.queries (
+                query_id VARCHAR(255) PRIMARY KEY,
+                query_text TEXT NOT NULL,
+                status VARCHAR(50) DEFAULT 'PENDING',
+                parsed_intent JSONB DEFAULT '{{}}',
+                execution_plan JSONB DEFAULT '{{}}',
+                realtime_fetch BOOLEAN DEFAULT FALSE,
+                channels JSONB DEFAULT '[]',
+                time_range JSONB,
+                risk_types JSONB DEFAULT '[]',
+                platforms JSONB DEFAULT '[]',
+                constraints JSONB DEFAULT '{{}}',
+                progress INTEGER DEFAULT 0,
+                stage VARCHAR(50),
+                message TEXT,
+                result_stats JSONB DEFAULT '{{"raw_message_count": 0, "cleaned_message_count": 0, "classified_message_count": 0, "clue_count": 0, "deep_analysis_count": 0}}',
+                failure_reason TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # clues table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.clues (
+                clue_id VARCHAR(255) PRIMARY KEY,
+                message_id VARCHAR(255) NOT NULL,
+                risk_label_level1 VARCHAR(100) NOT NULL,
+                risk_label_level2 VARCHAR(100) NOT NULL,
+                confidence REAL NOT NULL,
+                classification_source VARCHAR(50) NOT NULL,
+                raw_text TEXT,
+                cleaned_text TEXT,
+                classification_reason TEXT,
+                source_channel VARCHAR(50),
+                source_group_id VARCHAR(255),
+                source_author_id VARCHAR(255),
+                entity_list JSONB DEFAULT '[]',
+                slang_mappings JSONB DEFAULT '[]',
+                graph_relations JSONB DEFAULT '[]',
+                query_id VARCHAR(255),
+                platform VARCHAR(50),
+                published_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # feedback table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.feedback (
+                feedback_id VARCHAR(255) PRIMARY KEY,
+                clue_id VARCHAR(255) NOT NULL,
+                feedback_type VARCHAR(50) NOT NULL,
+                correct_risk_label_level1 VARCHAR(100),
+                correct_risk_label_level2 VARCHAR(100),
+                correct_entities JSONB DEFAULT '[]',
+                comment TEXT,
+                operator VARCHAR(100) DEFAULT '',
+                platinum_enrolled BOOLEAN DEFAULT FALSE,
+                sample_weight INTEGER DEFAULT 1,
+                model_update_status VARCHAR(50) DEFAULT 'IDLE',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # seed_words table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.seed_words (
+                word VARCHAR(255) PRIMARY KEY,
+                status VARCHAR(50) DEFAULT 'active',
+                source VARCHAR(50) DEFAULT 'preset',
+                weekly_hit_count INTEGER DEFAULT 0,
+                effective_clue_ratio REAL DEFAULT 0.0,
+                last_promoted_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # proposals table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.proposals (
+                proposal_id VARCHAR(255) PRIMARY KEY,
+                proposal_type VARCHAR(50) NOT NULL,
+                title TEXT NOT NULL,
+                detail TEXT,
+                status VARCHAR(50) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW(),
+                processed_at TIMESTAMP,
+                operator VARCHAR(100),
+                comment TEXT
+            )
+            """,
+
+            # exports table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.exports (
+                export_id VARCHAR(255) PRIMARY KEY,
+                query_id VARCHAR(255),
+                filters JSONB DEFAULT '{{}}',
+                export_format VARCHAR(20) DEFAULT 'json',
+                include_graph_relations BOOLEAN DEFAULT FALSE,
+                operator VARCHAR(100) DEFAULT '',
+                status VARCHAR(50) DEFAULT 'PENDING',
+                download_url TEXT,
+                expire_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # channels table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.channels (
+                platform VARCHAR(50) PRIMARY KEY,
+                platform_name VARCHAR(100) NOT NULL,
+                category VARCHAR(50) NOT NULL,
+                status VARCHAR(50) DEFAULT 'unconfigured',
+                enabled BOOLEAN DEFAULT FALSE,
+                config JSONB DEFAULT '{{}}',
+                configured_at TIMESTAMP,
+                messages_today INTEGER DEFAULT 0,
+                last_polling_at TIMESTAMP,
+                error_message TEXT
+            )
+            """,
+
+            # metrics table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.metrics (
+                date VARCHAR(20) PRIMARY KEY,
+                token_usage_today INTEGER DEFAULT 0,
+                token_remaining_percent REAL DEFAULT 1.0,
+                collection_success_rate REAL DEFAULT 1.0,
+                total_entities INTEGER DEFAULT 0,
+                total_relations INTEGER DEFAULT 0,
+                messages_processed_today INTEGER DEFAULT 0,
+                background_patrol_status VARCHAR(50) DEFAULT 'IDLE',
+                last_patrol_at TIMESTAMP,
+                classification_distribution JSONB DEFAULT '[]',
+                channel_status JSONB DEFAULT '[]',
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # auto_evolution table (single-row pattern)
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.auto_evolution (
+                id VARCHAR(50) PRIMARY KEY DEFAULT 'status',
+                silver_sample_count INTEGER DEFAULT 0,
+                platinum_sample_count INTEGER DEFAULT 0,
+                error_book_count INTEGER DEFAULT 0,
+                current_model_version VARCHAR(50) DEFAULT 'v0.0.0',
+                retrain_status VARCHAR(50) DEFAULT 'IDLE',
+                retrain_trigger_threshold INTEGER DEFAULT 2000,
+                last_retrain_at TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """
+        ]
+
+        with self._get_cursor() as cur:
+            for table_def in table_defs:
+                cur.execute(table_def)
+
+        logger.info(f"Created {len(table_defs)} tables in schema '{schema}'")
 
     def _create_indexes(self) -> None:
-        """Create necessary indexes for all collections."""
-        # Entity indexes
-        self.entities.create_index("entity_id", unique=True)
-        self.entities.create_index("entity_type")
-        self.entities.create_index("raw_value")
-        self.entities.create_index("last_seen")
-        self.entities.create_index([("entity_type", 1), ("raw_value", 1)], unique=True)
+        """Create necessary indexes."""
+        schema = self.schema
 
-        # MessageRef indexes
-        self.message_refs.create_index("ref_id", unique=True)
-        self.message_refs.create_index("entity_id")
-        self.message_refs.create_index("message_id")
+        indexes = [
+            # Entity indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_entities_entity_type ON {schema}.entities(entity_type)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_entities_raw_value ON {schema}.entities(raw_value)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_entities_last_seen ON {schema}.entities(last_seen)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_entities_entity_type_raw ON {schema}.entities(entity_type, raw_value)",),
 
-        # SlangMapping indexes
-        self.slang_mappings.create_index("mapping_id", unique=True)
-        self.slang_mappings.create_index("slang_raw", unique=True)
+            # MessageRef indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_message_refs_entity_id ON {schema}.message_refs(entity_id)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_message_refs_message_id ON {schema}.message_refs(message_id)",),
 
-        # SlangCandidate indexes
-        self.slang_candidates.create_index("candidate_word", 1, unique=True)
-        self.slang_candidates.create_index("status")
-        self.slang_candidates.create_index("source_channel")
+            # SlangCandidate indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_slang_candidates_status ON {schema}.slang_candidates(status)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_slang_candidates_source_channel ON {schema}.slang_candidates(source_channel)",),
 
-        # QueryTask indexes
-        self.queries.create_index("query_id", unique=True)
-        self.queries.create_index("status")
-        self.queries.create_index("created_at")
+            # QueryTask indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_queries_status ON {schema}.queries(status)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_queries_created_at ON {schema}.queries(created_at)",),
 
-        # Clue indexes
-        self.clues.create_index("clue_id", unique=True)
-        self.clues.create_index("message_id")
-        self.clues.create_index("query_id")
-        self.clues.create_index("risk_label_level1")
-        self.clues.create_index("risk_label_level2")
-        self.clues.create_index("source_channel")
-        self.clues.create_index("published_at")
-        self.clues.create_index([("risk_label_level1", 1), ("published_at", -1)])
+            # Clue indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_message_id ON {schema}.clues(message_id)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_query_id ON {schema}.clues(query_id)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_risk_level1 ON {schema}.clues(risk_label_level1)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_risk_level2 ON {schema}.clues(risk_label_level2)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_source_channel ON {schema}.clues(source_channel)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_published_at ON {schema}.clues(published_at)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_risk_published ON {schema}.clues(risk_label_level1, published_at DESC)",),
 
-        # Feedback indexes
-        self.feedback.create_index("feedback_id", unique=True)
-        self.feedback.create_index("clue_id")
-        self.feedback.create_index("created_at")
+            # Feedback indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_feedback_clue_id ON {schema}.feedback(clue_id)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON {schema}.feedback(created_at)",),
 
-        # SeedWord indexes
-        self.seed_words.create_index("word", unique=True)
-        self.seed_words.create_index("status")
-        self.seed_words.create_index("source")
+            # SeedWord indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_seed_words_status ON {schema}.seed_words(status)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_seed_words_source ON {schema}.seed_words(source)",),
 
-        # Proposal indexes
-        self.proposals.create_index("proposal_id", unique=True)
-        self.proposals.create_index("proposal_type")
-        self.proposals.create_index("status")
-        self.proposals.create_index("created_at")
+            # Proposal indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_proposals_proposal_type ON {schema}.proposals(proposal_type)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_proposals_status ON {schema}.proposals(status)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_proposals_created_at ON {schema}.proposals(created_at)",),
 
-        # ExportTask indexes
-        self.exports.create_index("export_id", unique=True)
-        self.exports.create_index("status")
-        self.exports.create_index("created_at")
+            # ExportTask indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_exports_status ON {schema}.exports(status)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_exports_created_at ON {schema}.exports(created_at)",),
+        ]
 
-        # Channel indexes
-        self.channels.create_index("platform", unique=True)
+        with self._get_cursor() as cur:
+            for idx_def in indexes:
+                cur.execute(idx_def[0])
 
-        # Metrics indexes
-        self.metrics.create_index("date", unique=True)
-
-        # AutoEvolution - single document pattern
-        logger.info("MongoDB indexes created successfully")
+        logger.info(f"Created {len(indexes)} indexes in schema '{schema}'")
 
     # ========== Entity Operations ==========
 
@@ -135,35 +365,77 @@ class MongoDBService:
         doc = entity.to_dict()
         entity_id = doc.pop("entity_id")
 
-        # Use upsert with entity_id as unique key
-        self.entities.update_one(
-            {"entity_id": entity_id},
-            {
-                "$set": doc,
-                "$inc": {"occurrence_count": 1},
-                "$setOnInsert": {
-                    "first_seen": datetime.utcnow(),
-                    "occurrence_count": 1
-                }
-            },
-            upsert=True
-        )
+        # Convert entity_type to string value
+        if hasattr(doc.get('entity_type'), 'value'):
+            doc['entity_type'] = doc['entity_type'].value
+
+        # Convert datetime to ISO format
+        for dt_field in ['first_seen', 'last_seen']:
+            if isinstance(doc.get(dt_field), datetime):
+                doc[dt_field] = doc[dt_field].isoformat()
+
+        # Convert lists/dicts to JSON
+        doc['risk_labels'] = Json(doc.get('risk_labels', []))
+        doc['metadata'] = Json(doc.get('metadata', {}))
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.entities
+                (entity_id, entity_type, raw_value, normalized_value, first_seen, last_seen,
+                 occurrence_count, source_channel, risk_labels, metadata)
+                VALUES (%(entity_id)s, %(entity_type)s, %(raw_value)s, %(normalized_value)s,
+                        %(first_seen)s, %(last_seen)s, %(occurrence_count)s, %(source_channel)s,
+                        %(risk_labels)s, %(metadata)s)
+                ON CONFLICT (entity_id) DO UPDATE SET
+                    last_seen = NOW(),
+                    occurrence_count = {}.entities.occurrence_count + 1,
+                    risk_labels = %(risk_labels)s,
+                    metadata = %(metadata)s
+            """).format(sql.Identifier(self.schema)), {
+                'entity_id': entity_id,
+                'entity_type': doc['entity_type'],
+                'raw_value': doc.get('raw_value'),
+                'normalized_value': doc.get('normalized_value'),
+                'first_seen': doc.get('first_seen'),
+                'last_seen': doc.get('last_seen'),
+                'occurrence_count': doc.get('occurrence_count', 0),
+                'source_channel': doc.get('source_channel'),
+                'risk_labels': doc.get('risk_labels'),
+                'metadata': doc.get('metadata'),
+            })
         return entity_id
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
         """Get an entity by ID."""
-        return self.entities.find_one({"entity_id": entity_id})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.entities WHERE entity_id = %s").format(
+                sql.Identifier(self.schema)), (entity_id,))
+            return cur.fetchone()
 
     def get_entity_by_value(self, entity_type: str, raw_value: str, source_channel: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Get entity by type and value."""
-        query = {"entity_type": entity_type, "raw_value": raw_value}
-        if source_channel:
-            query["source_channel"] = source_channel
-        return self.entities.find_one(query)
+        with self._get_cursor() as cur:
+            if source_channel:
+                cur.execute(sql.SQL("""
+                    SELECT * FROM {}.entities
+                    WHERE entity_type = %s AND raw_value = %s AND source_channel = %s
+                """).format(sql.Identifier(self.schema)), (entity_type, raw_value, source_channel))
+            else:
+                cur.execute(sql.SQL("""
+                    SELECT * FROM {}.entities
+                    WHERE entity_type = %s AND raw_value = %s
+                """).format(sql.Identifier(self.schema)), (entity_type, raw_value))
+            return cur.fetchone()
 
     def get_entities_by_type(self, entity_type: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Get entities by type."""
-        return list(self.entities.find({"entity_type": entity_type}).limit(limit))
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT * FROM {}.entities
+                WHERE entity_type = %s
+                LIMIT %s
+            """).format(sql.Identifier(self.schema)), (entity_type, limit))
+            return cur.fetchall()
 
     def get_entity_profile(self, entity_id: str, relation_depth: int = 1) -> Optional[Dict[str, Any]]:
         """Get entity profile with related entities."""
@@ -172,27 +444,47 @@ class MongoDBService:
             return None
 
         # Get related message refs
-        refs = list(self.message_refs.find({"entity_id": entity_id}))
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.message_refs WHERE entity_id = %s").format(
+                sql.Identifier(self.schema)), (entity_id,))
+            refs = cur.fetchall()
 
         # Get related entities from refs
         related_entities = []
         entity_ids = list(set([ref["entity_id"] for ref in refs]))
         if entity_ids:
-            related = list(self.entities.find({"entity_id": {"$in": entity_ids}}))
-            related_entities = [e for e in related if e["entity_id"] != entity_id]
+            with self._get_cursor() as cur:
+                placeholders = ','.join(['%s'] * len(entity_ids))
+                cur.execute(sql.SQL(f"""
+                    SELECT * FROM {self.schema}.entities
+                    WHERE entity_id IN ({placeholders})
+                """).as_string(self._conn), entity_ids)
+                related = cur.fetchall()
+                related_entities = [e for e in related if e["entity_id"] != entity_id]
 
         # Get risk distribution
-        risk_pipeline = [
-            {"$match": {"entity_id": entity_id}},
-            {"$group": {"_id": "$risk_label", "count": {"$sum": 1}}}
-        ]
-        risk_distribution = list(self.message_refs.aggregate(risk_pipeline))
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT risk_label, COUNT(*) as count
+                FROM {}.message_refs
+                WHERE entity_id = %s AND risk_label IS NOT NULL
+                GROUP BY risk_label
+            """).format(sql.Identifier(self.schema)), (entity_id,))
+            risk_distribution = cur.fetchall()
 
         # Get recent evidence
         message_ids = [ref["message_id"] for ref in refs]
-        recent_clues = list(self.clues.find(
-            {"message_id": {"$in": message_ids[:10]}}
-        ).sort("published_at", -1).limit(5))
+        recent_clues = []
+        if message_ids:
+            with self._get_cursor() as cur:
+                placeholders = ','.join(['%s'] * min(len(message_ids), 10))
+                cur.execute(sql.SQL(f"""
+                    SELECT clue_id, published_at, raw_text FROM {self.schema}.clues
+                    WHERE message_id IN ({placeholders})
+                    ORDER BY published_at DESC NULLS LAST
+                    LIMIT 5
+                """).as_string(self._conn), message_ids[:10])
+                recent_clues = cur.fetchall()
 
         return {
             "entity_id": entity["entity_id"],
@@ -207,7 +499,7 @@ class MongoDBService:
                 {
                     "clue_id": c.get("clue_id"),
                     "published_at": c.get("published_at"),
-                    "snippet": c.get("raw_text", "")[:200]
+                    "snippet": (c.get("raw_text") or "")[:200]
                 }
                 for c in recent_clues
             ]
@@ -215,19 +507,44 @@ class MongoDBService:
 
     def get_total_entities_count(self) -> int:
         """Get total count of entities."""
-        return self.entities.count_documents({})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT COUNT(*) as cnt FROM {}.entities").format(
+                sql.Identifier(self.schema)))
+            return cur.fetchone()['cnt']
 
     # ========== MessageRef Operations ==========
 
     def insert_message_ref(self, ref: MessageRef) -> str:
         """Insert a message reference."""
         doc = ref.to_dict()
-        self.message_refs.insert_one(doc)
-        return doc["ref_id"]
+        ref_id = doc.pop("ref_id")
+
+        if isinstance(doc.get('created_at'), datetime):
+            doc['created_at'] = doc['created_at'].isoformat()
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.message_refs
+                (ref_id, entity_id, message_id, source, context_snippet, risk_label, created_at)
+                VALUES (%(ref_id)s, %(entity_id)s, %(message_id)s, %(source)s,
+                        %(context_snippet)s, %(risk_label)s, %(created_at)s)
+            """).format(sql.Identifier(self.schema)), {
+                'ref_id': ref_id,
+                'entity_id': doc['entity_id'],
+                'message_id': doc['message_id'],
+                'source': doc.get('source'),
+                'context_snippet': doc.get('context_snippet'),
+                'risk_label': doc.get('risk_label'),
+                'created_at': doc.get('created_at'),
+            })
+        return ref_id
 
     def get_message_refs(self, entity_id: str) -> List[Dict[str, Any]]:
         """Get all message refs for an entity."""
-        return list(self.message_refs.find({"entity_id": entity_id}))
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.message_refs WHERE entity_id = %s").format(
+                sql.Identifier(self.schema)), (entity_id,))
+            return cur.fetchall()
 
     # ========== SlangMapping Operations ==========
 
@@ -236,21 +553,53 @@ class MongoDBService:
         doc = mapping.to_dict()
         mapping_id = doc.pop("mapping_id")
 
-        self.slang_mappings.update_one(
-            {"mapping_id": mapping_id},
-            {"$set": doc},
-            upsert=True
-        )
+        # Convert datetime to ISO format
+        for dt_field in ['created_at', 'updated_at']:
+            if isinstance(doc.get(dt_field), datetime):
+                doc[dt_field] = doc[dt_field].isoformat()
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.slang_mappings
+                (mapping_id, slang_raw, meaning, regex_pattern, source, verified, confidence, created_at, updated_at)
+                VALUES (%(mapping_id)s, %(slang_raw)s, %(meaning)s, %(regex_pattern)s,
+                        %(source)s, %(verified)s, %(confidence)s, %(created_at)s, %(updated_at)s)
+                ON CONFLICT (slang_raw) DO UPDATE SET
+                    meaning = EXCLUDED.meaning,
+                    regex_pattern = EXCLUDED.regex_pattern,
+                    verified = EXCLUDED.verified,
+                    confidence = EXCLUDED.confidence,
+                    updated_at = NOW()
+            """).format(sql.Identifier(self.schema)), {
+                'mapping_id': mapping_id,
+                'slang_raw': doc['slang_raw'],
+                'meaning': doc.get('meaning'),
+                'regex_pattern': doc.get('regex_pattern'),
+                'source': doc.get('source', 'preset'),
+                'verified': doc.get('verified', False),
+                'confidence': doc.get('confidence', 1.0),
+                'created_at': doc.get('created_at'),
+                'updated_at': doc.get('updated_at'),
+            })
         return mapping_id
 
     def get_slang_mapping(self, slang_raw: str) -> Optional[Dict[str, Any]]:
         """Get slang mapping by raw term."""
-        return self.slang_mappings.find_one({"slang_raw": slang_raw})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.slang_mappings WHERE slang_raw = %s").format(
+                sql.Identifier(self.schema)), (slang_raw,))
+            return cur.fetchone()
 
     def get_all_slang_mappings(self, verified_only: bool = True) -> List[Dict[str, Any]]:
         """Get all slang mappings."""
-        query = {"verified": True} if verified_only else {}
-        return list(self.slang_mappings.find(query))
+        with self._get_cursor() as cur:
+            if verified_only:
+                cur.execute(sql.SQL("SELECT * FROM {}.slang_mappings WHERE verified = TRUE").format(
+                    sql.Identifier(self.schema)))
+            else:
+                cur.execute(sql.SQL("SELECT * FROM {}.slang_mappings").format(
+                    sql.Identifier(self.schema)))
+            return cur.fetchall()
 
     # ========== SlangCandidate Operations ==========
 
@@ -259,55 +608,203 @@ class MongoDBService:
         doc = candidate.to_dict()
         word = doc.pop("candidate_word")
 
-        self.slang_candidates.update_one(
-            {"candidate_word": word},
-            {"$set": doc},
-            upsert=True
-        )
+        # Convert datetime to ISO format
+        for dt_field in ['created_at', 'updated_at', 'reject_until']:
+            if isinstance(doc.get(dt_field), datetime):
+                doc[dt_field] = doc[dt_field].isoformat()
+
+        # Convert status enum
+        if hasattr(doc.get('status'), 'value'):
+            doc['status'] = doc['status'].value
+
+        doc['contexts'] = Json(doc.get('contexts', []))
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.slang_candidates
+                (candidate_word, contexts, occurrence_count, status, inference_count,
+                 reject_until, regex_pattern, meaning, source_channel, created_at, updated_at)
+                VALUES (%(candidate_word)s, %(contexts)s, %(occurrence_count)s, %(status)s,
+                        %(inference_count)s, %(reject_until)s, %(regex_pattern)s, %(meaning)s,
+                        %(source_channel)s, %(created_at)s, %(updated_at)s)
+                ON CONFLICT (candidate_word) DO UPDATE SET
+                    contexts = EXCLUDED.contexts,
+                    occurrence_count = EXCLUDED.occurrence_count,
+                    status = EXCLUDED.status,
+                    inference_count = EXCLUDED.inference_count,
+                    updated_at = NOW()
+            """).format(sql.Identifier(self.schema)), {
+                'candidate_word': word,
+                'contexts': doc.get('contexts'),
+                'occurrence_count': doc.get('occurrence_count', 0),
+                'status': doc.get('status', 'NEW'),
+                'inference_count': doc.get('inference_count', 0),
+                'reject_until': doc.get('reject_until'),
+                'regex_pattern': doc.get('regex_pattern'),
+                'meaning': doc.get('meaning'),
+                'source_channel': doc.get('source_channel'),
+                'created_at': doc.get('created_at'),
+                'updated_at': doc.get('updated_at'),
+            })
         return word
 
     def get_slang_candidate(self, word: str) -> Optional[Dict[str, Any]]:
         """Get a slang candidate by word."""
-        return self.slang_candidates.find_one({"candidate_word": word})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.slang_candidates WHERE candidate_word = %s").format(
+                sql.Identifier(self.schema)), (word,))
+            return cur.fetchone()
 
     def get_slang_candidates_by_status(self, status: SlangStatus) -> List[Dict[str, Any]]:
         """Get slang candidates by status."""
-        return list(self.slang_candidates.find(
-            {"status": status.value if isinstance(status, SlangStatus) else status}
-        ))
+        status_val = status.value if isinstance(status, SlangStatus) else status
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.slang_candidates WHERE status = %s").format(
+                sql.Identifier(self.schema)), (status_val,))
+            return cur.fetchall()
 
     # ========== QueryTask Operations ==========
 
     def create_query_task(self, task: QueryTask) -> str:
         """Create a new query task."""
         doc = task.to_dict()
-        self.queries.insert_one(doc)
-        return doc["query_id"]
+        query_id = doc.pop("query_id")
+
+        # Convert datetime to ISO format
+        for dt_field in ['created_at', 'updated_at']:
+            if isinstance(doc.get(dt_field), datetime):
+                doc[dt_field] = doc[dt_field].isoformat()
+
+        # Convert status enum
+        if hasattr(doc.get('status'), 'value'):
+            doc['status'] = doc['status'].value
+
+        # Convert JSON fields
+        for json_field in ['parsed_intent', 'execution_plan', 'channels', 'time_range',
+                          'risk_types', 'platforms', 'constraints', 'result_stats']:
+            doc[json_field] = Json(doc.get(json_field, {}))
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.queries
+                (query_id, query_text, status, parsed_intent, execution_plan, realtime_fetch,
+                 channels, time_range, risk_types, platforms, constraints, progress, stage,
+                 message, result_stats, failure_reason, created_at, updated_at)
+                VALUES (%(query_id)s, %(query_text)s, %(status)s, %(parsed_intent)s, %(execution_plan)s,
+                        %(realtime_fetch)s, %(channels)s, %(time_range)s, %(risk_types)s, %(platforms)s,
+                        %(constraints)s, %(progress)s, %(stage)s, %(message)s, %(result_stats)s,
+                        %(failure_reason)s, %(created_at)s, %(updated_at)s)
+            """).format(sql.Identifier(self.schema)), {
+                'query_id': query_id,
+                'query_text': doc.get('query_text'),
+                'status': doc.get('status', 'PENDING'),
+                'parsed_intent': doc.get('parsed_intent'),
+                'execution_plan': doc.get('execution_plan'),
+                'realtime_fetch': doc.get('realtime_fetch', False),
+                'channels': doc.get('channels'),
+                'time_range': doc.get('time_range'),
+                'risk_types': doc.get('risk_types'),
+                'platforms': doc.get('platforms'),
+                'constraints': doc.get('constraints'),
+                'progress': doc.get('progress', 0),
+                'stage': doc.get('stage'),
+                'message': doc.get('message'),
+                'result_stats': doc.get('result_stats'),
+                'failure_reason': doc.get('failure_reason'),
+                'created_at': doc.get('created_at'),
+                'updated_at': doc.get('updated_at'),
+            })
+        return query_id
 
     def update_query_task(self, query_id: str, updates: Dict[str, Any]) -> bool:
         """Update a query task."""
         updates["updated_at"] = datetime.utcnow().isoformat()
-        result = self.queries.update_one(
-            {"query_id": query_id},
-            {"$set": updates}
-        )
-        return result.modified_count > 0
+
+        # Build dynamic update query
+        set_clauses = []
+        params = {'query_id': query_id}
+        for i, (k, v) in enumerate(updates.items()):
+            set_clauses.append(f"{k} = %({k})s")
+            if isinstance(v, (dict, list)):
+                params[k] = json.dumps(v)
+            else:
+                params[k] = v
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                UPDATE {}.queries
+                SET {}
+                WHERE query_id = %(query_id)s
+            """).format(
+                sql.Identifier(self.schema),
+                sql.SQL(', '.join(set_clauses))
+            ), params)
+            return cur.rowcount > 0
 
     def get_query_task(self, query_id: str) -> Optional[Dict[str, Any]]:
         """Get a query task by ID."""
-        return self.queries.find_one({"query_id": query_id})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.queries WHERE query_id = %s").format(
+                sql.Identifier(self.schema)), (query_id,))
+            return cur.fetchone()
 
     # ========== Clue Operations ==========
 
     def insert_clue(self, clue: Clue) -> str:
         """Insert a clue."""
         doc = clue.to_dict()
-        self.clues.insert_one(doc)
-        return doc["clue_id"]
+        clue_id = doc.pop("clue_id")
+
+        # Convert datetime to ISO format
+        for dt_field in ['published_at', 'created_at']:
+            if isinstance(doc.get(dt_field), datetime):
+                doc[dt_field] = doc[dt_field].isoformat()
+
+        # Convert JSON fields
+        for json_field in ['entity_list', 'slang_mappings', 'graph_relations']:
+            doc[json_field] = Json(doc.get(json_field, []))
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.clues
+                (clue_id, message_id, risk_label_level1, risk_label_level2, confidence,
+                 classification_source, raw_text, cleaned_text, classification_reason,
+                 source_channel, source_group_id, source_author_id, entity_list,
+                 slang_mappings, graph_relations, query_id, platform, published_at, created_at)
+                VALUES (%(clue_id)s, %(message_id)s, %(risk_label_level1)s, %(risk_label_level2)s,
+                        %(confidence)s, %(classification_source)s, %(raw_text)s, %(cleaned_text)s,
+                        %(classification_reason)s, %(source_channel)s, %(source_group_id)s,
+                        %(source_author_id)s, %(entity_list)s, %(slang_mappings)s, %(graph_relations)s,
+                        %(query_id)s, %(platform)s, %(published_at)s, %(created_at)s)
+            """).format(sql.Identifier(self.schema)), {
+                'clue_id': clue_id,
+                'message_id': doc.get('message_id'),
+                'risk_label_level1': doc.get('risk_label_level1'),
+                'risk_label_level2': doc.get('risk_label_level2'),
+                'confidence': doc.get('confidence'),
+                'classification_source': doc.get('classification_source'),
+                'raw_text': doc.get('raw_text'),
+                'cleaned_text': doc.get('cleaned_text'),
+                'classification_reason': doc.get('classification_reason'),
+                'source_channel': doc.get('source_channel'),
+                'source_group_id': doc.get('source_group_id'),
+                'source_author_id': doc.get('source_author_id'),
+                'entity_list': doc.get('entity_list'),
+                'slang_mappings': doc.get('slang_mappings'),
+                'graph_relations': doc.get('graph_relations'),
+                'query_id': doc.get('query_id'),
+                'platform': doc.get('platform'),
+                'published_at': doc.get('published_at'),
+                'created_at': doc.get('created_at'),
+            })
+        return clue_id
 
     def get_clue(self, clue_id: str) -> Optional[Dict[str, Any]]:
         """Get a clue by ID."""
-        return self.clues.find_one({"clue_id": clue_id})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.clues WHERE clue_id = %s").format(
+                sql.Identifier(self.schema)), (clue_id,))
+            return cur.fetchone()
 
     def get_clues(
         self,
@@ -320,39 +817,69 @@ class MongoDBService:
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         sort_by: str = "published_at",
-        sort_order: int = pymongo.DESCENDING,
+        sort_order: int = -1,
         page_no: int = 1,
         page_size: int = 10
     ) -> Dict[str, Any]:
         """Get clues with filtering and pagination."""
-        query = {}
+        conditions = []
+        params = {}
 
         if query_id:
-            query["query_id"] = query_id
+            conditions.append("query_id = %(query_id)s")
+            params['query_id'] = query_id
         if risk_label_level1:
-            query["risk_label_level1"] = risk_label_level1
+            conditions.append("risk_label_level1 = %(risk_label_level1)s")
+            params['risk_label_level1'] = risk_label_level1
         if risk_label_level2:
-            query["risk_label_level2"] = risk_label_level2
+            conditions.append("risk_label_level2 = %(risk_label_level2)s")
+            params['risk_label_level2'] = risk_label_level2
         if source_channel:
-            query["source_channel"] = source_channel
+            conditions.append("source_channel = %(source_channel)s")
+            params['source_channel'] = source_channel
         if min_confidence:
-            query["confidence"] = {"$gte": min_confidence}
-        if start_time or end_time:
-            query["published_at"] = {}
-            if start_time:
-                query["published_at"]["$gte"] = start_time
-            if end_time:
-                query["published_at"]["$lte"] = end_time
+            conditions.append("confidence >= %(min_confidence)s")
+            params['min_confidence'] = min_confidence
+        if start_time:
+            conditions.append("published_at >= %(start_time)s")
+            params['start_time'] = start_time
+        if end_time:
+            conditions.append("published_at <= %(end_time)s")
+            params['end_time'] = end_time
 
-        total = self.clues.count_documents(query)
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        sort_direction = pymongo.DESCENDING if sort_order == -1 else pymongo.ASCENDING
-        skip = (page_no - 1) * page_size
+        # Determine sort direction
+        sort_dir = "DESC" if sort_order == -1 else "ASC"
+        # Quote reserved words
+        sort_col = f'"{sort_by}"' if sort_by.lower() in ('desc', 'content') else sort_by
 
-        items = list(self.clues.find(query)
-                    .sort(sort_by, sort_direction)
-                    .skip(skip)
-                    .limit(page_size))
+        # Get total count
+        with self._get_cursor() as cur:
+            count_query = sql.SQL("""
+                SELECT COUNT(*) as total FROM {}.clues WHERE {}
+            """).format(sql.Identifier(self.schema), sql.SQL(where_clause))
+            cur.execute(count_query, params)
+            total = cur.fetchone()['total']
+
+        # Get paginated items
+        offset = (page_no - 1) * page_size
+        params['limit'] = page_size
+        params['offset'] = offset
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT * FROM {}.clues
+                WHERE {}
+                ORDER BY {} {}
+                LIMIT %(limit)s OFFSET %(offset)s
+            """).format(
+                sql.Identifier(self.schema),
+                sql.SQL(where_clause),
+                sql.Identifier(sort_by),
+                sql.SQL(sort_dir)
+            ), params)
+            items = cur.fetchall()
 
         return {
             "page_no": page_no,
@@ -363,19 +890,55 @@ class MongoDBService:
 
     def get_clue_count(self) -> int:
         """Get total count of clues."""
-        return self.clues.count_documents({})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT COUNT(*) as cnt FROM {}.clues").format(
+                sql.Identifier(self.schema)))
+            return cur.fetchone()['cnt']
 
     # ========== Feedback Operations ==========
 
     def insert_feedback(self, feedback: Feedback) -> str:
         """Insert feedback."""
         doc = feedback.to_dict()
-        self.feedback.insert_one(doc)
-        return doc["feedback_id"]
+        feedback_id = doc.pop("feedback_id")
+
+        if isinstance(doc.get('created_at'), datetime):
+            doc['created_at'] = doc['created_at'].isoformat()
+
+        doc['correct_entities'] = Json(doc.get('correct_entities', []))
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.feedback
+                (feedback_id, clue_id, feedback_type, correct_risk_label_level1,
+                 correct_risk_label_level2, correct_entities, comment, operator,
+                 platinum_enrolled, sample_weight, model_update_status, created_at)
+                VALUES (%(feedback_id)s, %(clue_id)s, %(feedback_type)s,
+                        %(correct_risk_label_level1)s, %(correct_risk_label_level2)s,
+                        %(correct_entities)s, %(comment)s, %(operator)s,
+                        %(platinum_enrolled)s, %(sample_weight)s, %(model_update_status)s, %(created_at)s)
+            """).format(sql.Identifier(self.schema)), {
+                'feedback_id': feedback_id,
+                'clue_id': doc.get('clue_id'),
+                'feedback_type': doc.get('feedback_type'),
+                'correct_risk_label_level1': doc.get('correct_risk_label_level1'),
+                'correct_risk_label_level2': doc.get('correct_risk_label_level2'),
+                'correct_entities': doc.get('correct_entities'),
+                'comment': doc.get('comment'),
+                'operator': doc.get('operator', ''),
+                'platinum_enrolled': doc.get('platinum_enrolled', False),
+                'sample_weight': doc.get('sample_weight', 1),
+                'model_update_status': doc.get('model_update_status', 'IDLE'),
+                'created_at': doc.get('created_at'),
+            })
+        return feedback_id
 
     def get_feedback(self, feedback_id: str) -> Optional[Dict[str, Any]]:
         """Get feedback by ID."""
-        return self.feedback.find_one({"feedback_id": feedback_id})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.feedback WHERE feedback_id = %s").format(
+                sql.Identifier(self.schema)), (feedback_id,))
+            return cur.fetchone()
 
     # ========== SeedWord Operations ==========
 
@@ -384,16 +947,44 @@ class MongoDBService:
         doc = seed_word.to_dict()
         word = doc.pop("word")
 
-        self.seed_words.update_one(
-            {"word": word},
-            {"$set": doc},
-            upsert=True
-        )
+        for dt_field in ['created_at', 'updated_at', 'last_promoted_at']:
+            if isinstance(doc.get(dt_field), datetime):
+                doc[dt_field] = doc[dt_field].isoformat()
+
+        if hasattr(doc.get('status'), 'value'):
+            doc['status'] = doc['status'].value
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.seed_words
+                (word, status, source, weekly_hit_count, effective_clue_ratio,
+                 last_promoted_at, created_at, updated_at)
+                VALUES (%(word)s, %(status)s, %(source)s, %(weekly_hit_count)s,
+                        %(effective_clue_ratio)s, %(last_promoted_at)s, %(created_at)s, %(updated_at)s)
+                ON CONFLICT (word) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    weekly_hit_count = EXCLUDED.weekly_hit_count,
+                    effective_clue_ratio = EXCLUDED.effective_clue_ratio,
+                    last_promoted_at = EXCLUDED.last_promoted_at,
+                    updated_at = NOW()
+            """).format(sql.Identifier(self.schema)), {
+                'word': word,
+                'status': doc.get('status', 'active'),
+                'source': doc.get('source', 'preset'),
+                'weekly_hit_count': doc.get('weekly_hit_count', 0),
+                'effective_clue_ratio': doc.get('effective_clue_ratio', 0.0),
+                'last_promoted_at': doc.get('last_promoted_at'),
+                'created_at': doc.get('created_at'),
+                'updated_at': doc.get('updated_at'),
+            })
         return word
 
     def get_seed_word(self, word: str) -> Optional[Dict[str, Any]]:
         """Get a seed word."""
-        return self.seed_words.find_one({"word": word})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.seed_words WHERE word = %s").format(
+                sql.Identifier(self.schema)), (word,))
+            return cur.fetchone()
 
     def get_seed_words(
         self,
@@ -403,18 +994,36 @@ class MongoDBService:
         page_size: int = 20
     ) -> Dict[str, Any]:
         """Get seed words with filtering."""
-        query = {}
+        conditions = []
+        params = {}
+
         if status:
-            query["status"] = status
+            conditions.append("status = %(status)s")
+            params['status'] = status
         if source:
-            query["source"] = source
+            conditions.append("source = %(source)s")
+            params['source'] = source
 
-        total = self.seed_words.count_documents(query)
-        skip = (page_no - 1) * page_size
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        items = list(self.seed_words.find(query)
-                    .skip(skip)
-                    .limit(page_size))
+        with self._get_cursor() as cur:
+            # Count total
+            cur.execute(sql.SQL("""
+                SELECT COUNT(*) as total FROM {}.seed_words WHERE {}
+            """).format(sql.Identifier(self.schema), sql.SQL(where_clause)), params)
+            total = cur.fetchone()['total']
+
+            # Get paginated items
+            offset = (page_no - 1) * page_size
+            params['limit'] = page_size
+            params['offset'] = offset
+
+            cur.execute(sql.SQL("""
+                SELECT * FROM {}.seed_words
+                WHERE {}
+                LIMIT %(limit)s OFFSET %(offset)s
+            """).format(sql.Identifier(self.schema), sql.SQL(where_clause)), params)
+            items = cur.fetchall()
 
         return {
             "page_no": page_no,
@@ -425,28 +1034,51 @@ class MongoDBService:
 
     def promote_seed_word(self, word: str, operator: str, reason: Optional[str] = None) -> bool:
         """Promote a seed word to active status."""
-        result = self.seed_words.update_one(
-            {"word": word},
-            {
-                "$set": {
-                    "status": SeedWordStatus.ACTIVE.value,
-                    "last_promoted_at": datetime.utcnow()
-                }
-            }
-        )
-        return result.modified_count > 0
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                UPDATE {}.seed_words
+                SET status = %s, last_promoted_at = %s
+                WHERE word = %s
+            """).format(sql.Identifier(self.schema)),
+                        (SeedWordStatus.ACTIVE.value, datetime.utcnow(), word))
+            return cur.rowcount > 0
 
     # ========== Proposal Operations ==========
 
     def insert_proposal(self, proposal: Proposal) -> str:
         """Insert a proposal."""
         doc = proposal.to_dict()
-        self.proposals.insert_one(doc)
-        return doc["proposal_id"]
+        proposal_id = doc.pop("proposal_id")
+
+        for dt_field in ['created_at', 'processed_at']:
+            if isinstance(doc.get(dt_field), datetime):
+                doc[dt_field] = doc[dt_field].isoformat()
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.proposals
+                (proposal_id, proposal_type, title, detail, status, created_at, processed_at, operator, comment)
+                VALUES (%(proposal_id)s, %(proposal_type)s, %(title)s, %(detail)s,
+                        %(status)s, %(created_at)s, %(processed_at)s, %(operator)s, %(comment)s)
+            """).format(sql.Identifier(self.schema)), {
+                'proposal_id': proposal_id,
+                'proposal_type': doc.get('proposal_type'),
+                'title': doc.get('title'),
+                'detail': doc.get('detail'),
+                'status': doc.get('status', 'pending'),
+                'created_at': doc.get('created_at'),
+                'processed_at': doc.get('processed_at'),
+                'operator': doc.get('operator'),
+                'comment': doc.get('comment'),
+            })
+        return proposal_id
 
     def get_proposal(self, proposal_id: str) -> Optional[Dict[str, Any]]:
         """Get a proposal by ID."""
-        return self.proposals.find_one({"proposal_id": proposal_id})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.proposals WHERE proposal_id = %s").format(
+                sql.Identifier(self.schema)), (proposal_id,))
+            return cur.fetchone()
 
     def get_proposals(
         self,
@@ -456,19 +1088,35 @@ class MongoDBService:
         page_size: int = 20
     ) -> Dict[str, Any]:
         """Get proposals with filtering."""
-        query = {}
+        conditions = []
+        params = {}
+
         if proposal_type:
-            query["proposal_type"] = proposal_type
+            conditions.append("proposal_type = %(proposal_type)s")
+            params['proposal_type'] = proposal_type
         if status:
-            query["status"] = status
+            conditions.append("status = %(status)s")
+            params['status'] = status
 
-        total = self.proposals.count_documents(query)
-        skip = (page_no - 1) * page_size
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        items = list(self.proposals.find(query)
-                    .sort("created_at", -1)
-                    .skip(skip)
-                    .limit(page_size))
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT COUNT(*) as total FROM {}.proposals WHERE {}
+            """).format(sql.Identifier(self.schema), sql.SQL(where_clause)), params)
+            total = cur.fetchone()['total']
+
+            offset = (page_no - 1) * page_size
+            params['limit'] = page_size
+            params['offset'] = offset
+
+            cur.execute(sql.SQL("""
+                SELECT * FROM {}.proposals
+                WHERE {}
+                ORDER BY created_at DESC
+                LIMIT %(limit)s OFFSET %(offset)s
+            """).format(sql.Identifier(self.schema), sql.SQL(where_clause)), params)
+            items = cur.fetchall()
 
         return {
             "page_no": page_no,
@@ -479,38 +1127,82 @@ class MongoDBService:
 
     def approve_proposal(self, proposal_id: str, operator: str, comment: Optional[str] = None) -> bool:
         """Approve a proposal."""
-        result = self.proposals.update_one(
-            {"proposal_id": proposal_id, "status": "pending"},
-            {
-                "$set": {
-                    "status": "approved",
-                    "processed_at": datetime.utcnow(),
-                    "operator": operator,
-                    "comment": comment
-                }
-            }
-        )
-        return result.modified_count > 0
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                UPDATE {}.proposals
+                SET status = 'approved', processed_at = %s, operator = %s, comment = %s
+                WHERE proposal_id = %s AND status = 'pending'
+            """).format(sql.Identifier(self.schema)),
+                        (datetime.utcnow(), operator, comment, proposal_id))
+            return cur.rowcount > 0
 
     # ========== ExportTask Operations ==========
 
     def create_export_task(self, task: ExportTask) -> str:
         """Create an export task."""
         doc = task.to_dict()
-        self.exports.insert_one(doc)
-        return doc["export_id"]
+        export_id = doc.pop("export_id")
+
+        if isinstance(doc.get('created_at'), datetime):
+            doc['created_at'] = doc['created_at'].isoformat()
+        if isinstance(doc.get('expire_at'), datetime):
+            doc['expire_at'] = doc['expire_at'].isoformat()
+
+        if hasattr(doc.get('status'), 'value'):
+            doc['status'] = doc['status'].value
+
+        doc['filters'] = Json(doc.get('filters', {}))
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.exports
+                (export_id, query_id, filters, export_format, include_graph_relations,
+                 operator, status, download_url, expire_at, created_at)
+                VALUES (%(export_id)s, %(query_id)s, %(filters)s, %(export_format)s,
+                        %(include_graph_relations)s, %(operator)s, %(status)s,
+                        %(download_url)s, %(expire_at)s, %(created_at)s)
+            """).format(sql.Identifier(self.schema)), {
+                'export_id': export_id,
+                'query_id': doc.get('query_id'),
+                'filters': doc.get('filters'),
+                'export_format': doc.get('export_format', 'json'),
+                'include_graph_relations': doc.get('include_graph_relations', False),
+                'operator': doc.get('operator', ''),
+                'status': doc.get('status', 'PENDING'),
+                'download_url': doc.get('download_url'),
+                'expire_at': doc.get('expire_at'),
+                'created_at': doc.get('created_at'),
+            })
+        return export_id
 
     def update_export_task(self, export_id: str, updates: Dict[str, Any]) -> bool:
         """Update an export task."""
-        result = self.exports.update_one(
-            {"export_id": export_id},
-            {"$set": updates}
-        )
-        return result.modified_count > 0
+        set_clauses = []
+        params = {'export_id': export_id}
+        for k, v in updates.items():
+            set_clauses.append(f"{k} = %({k})s")
+            if isinstance(v, (dict, list)):
+                params[k] = json.dumps(v)
+            else:
+                params[k] = v
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                UPDATE {}.exports
+                SET {}
+                WHERE export_id = %(export_id)s
+            """).format(
+                sql.Identifier(self.schema),
+                sql.SQL(', '.join(set_clauses))
+            ), params)
+            return cur.rowcount > 0
 
     def get_export_task(self, export_id: str) -> Optional[Dict[str, Any]]:
         """Get an export task."""
-        return self.exports.find_one({"export_id": export_id})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.exports WHERE export_id = %s").format(
+                sql.Identifier(self.schema)), (export_id,))
+            return cur.fetchone()
 
     # ========== Channel Operations ==========
 
@@ -519,23 +1211,62 @@ class MongoDBService:
         doc = channel.to_dict()
         platform = doc.pop("platform")
 
-        self.channels.update_one(
-            {"platform": platform},
-            {"$set": doc},
-            upsert=True
-        )
+        if isinstance(doc.get('configured_at'), datetime):
+            doc['configured_at'] = doc['configured_at'].isoformat()
+        if isinstance(doc.get('last_polling_at'), datetime):
+            doc['last_polling_at'] = doc['last_polling_at'].isoformat()
+
+        doc['config'] = Json(doc.get('config', {}))
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.channels
+                (platform, platform_name, category, status, enabled, config,
+                 configured_at, messages_today, last_polling_at, error_message)
+                VALUES (%(platform)s, %(platform_name)s, %(category)s, %(status)s,
+                        %(enabled)s, %(config)s, %(configured_at)s, %(messages_today)s,
+                        %(last_polling_at)s, %(error_message)s)
+                ON CONFLICT (platform) DO UPDATE SET
+                    platform_name = EXCLUDED.platform_name,
+                    category = EXCLUDED.category,
+                    status = EXCLUDED.status,
+                    enabled = EXCLUDED.enabled,
+                    config = EXCLUDED.config,
+                    configured_at = EXCLUDED.configured_at,
+                    messages_today = EXCLUDED.messages_today,
+                    last_polling_at = EXCLUDED.last_polling_at,
+                    error_message = EXCLUDED.error_message
+            """).format(sql.Identifier(self.schema)), {
+                'platform': platform,
+                'platform_name': doc.get('platform_name'),
+                'category': doc.get('category'),
+                'status': doc.get('status', 'unconfigured'),
+                'enabled': doc.get('enabled', False),
+                'config': doc.get('config'),
+                'configured_at': doc.get('configured_at'),
+                'messages_today': doc.get('messages_today', 0),
+                'last_polling_at': doc.get('last_polling_at'),
+                'error_message': doc.get('error_message'),
+            })
         return platform
 
     def get_channel(self, platform: str) -> Optional[Dict[str, Any]]:
         """Get a channel by platform."""
-        return self.channels.find_one({"platform": platform})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.channels WHERE platform = %s").format(
+                sql.Identifier(self.schema)), (platform,))
+            return cur.fetchone()
 
     def get_all_channels(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get all channels."""
-        query = {}
-        if category:
-            query["category"] = category
-        return list(self.channels.find(query))
+        with self._get_cursor() as cur:
+            if category:
+                cur.execute(sql.SQL("SELECT * FROM {}.channels WHERE category = %s").format(
+                    sql.Identifier(self.schema)), (category,))
+            else:
+                cur.execute(sql.SQL("SELECT * FROM {}.channels").format(
+                    sql.Identifier(self.schema)))
+            return cur.fetchall()
 
     # ========== Metrics Operations ==========
 
@@ -544,26 +1275,83 @@ class MongoDBService:
         doc = metrics.to_dict()
         date = doc.pop("date")
 
-        self.metrics.update_one(
-            {"date": date},
-            {"$set": doc},
-            upsert=True
-        )
+        if isinstance(doc.get('updated_at'), datetime):
+            doc['updated_at'] = doc['updated_at'].isoformat()
+        if isinstance(doc.get('last_patrol_at'), datetime):
+            doc['last_patrol_at'] = doc['last_patrol_at'].isoformat()
+
+        if hasattr(doc.get('background_patrol_status'), 'value'):
+            doc['background_patrol_status'] = doc['background_patrol_status'].value
+
+        doc['classification_distribution'] = Json(doc.get('classification_distribution', []))
+        doc['channel_status'] = Json(doc.get('channel_status', []))
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.metrics
+                (date, token_usage_today, token_remaining_percent, collection_success_rate,
+                 total_entities, total_relations, messages_processed_today,
+                 background_patrol_status, last_patrol_at, classification_distribution,
+                 channel_status, updated_at)
+                VALUES (%(date)s, %(token_usage_today)s, %(token_remaining_percent)s,
+                        %(collection_success_rate)s, %(total_entities)s, %(total_relations)s,
+                        %(messages_processed_today)s, %(background_patrol_status)s,
+                        %(last_patrol_at)s, %(classification_distribution)s,
+                        %(channel_status)s, %(updated_at)s)
+                ON CONFLICT (date) DO UPDATE SET
+                    token_usage_today = EXCLUDED.token_usage_today,
+                    token_remaining_percent = EXCLUDED.token_remaining_percent,
+                    collection_success_rate = EXCLUDED.collection_success_rate,
+                    total_entities = EXCLUDED.total_entities,
+                    total_relations = EXCLUDED.total_relations,
+                    messages_processed_today = EXCLUDED.messages_processed_today,
+                    background_patrol_status = EXCLUDED.background_patrol_status,
+                    last_patrol_at = EXCLUDED.last_patrol_at,
+                    classification_distribution = EXCLUDED.classification_distribution,
+                    channel_status = EXCLUDED.channel_status,
+                    updated_at = NOW()
+            """).format(sql.Identifier(self.schema)), {
+                'date': date,
+                'token_usage_today': doc.get('token_usage_today', 0),
+                'token_remaining_percent': doc.get('token_remaining_percent', 1.0),
+                'collection_success_rate': doc.get('collection_success_rate', 1.0),
+                'total_entities': doc.get('total_entities', 0),
+                'total_relations': doc.get('total_relations', 0),
+                'messages_processed_today': doc.get('messages_processed_today', 0),
+                'background_patrol_status': doc.get('background_patrol_status', 'IDLE'),
+                'last_patrol_at': doc.get('last_patrol_at'),
+                'classification_distribution': doc.get('classification_distribution'),
+                'channel_status': doc.get('channel_status'),
+                'updated_at': doc.get('updated_at'),
+            })
         return date
 
     def get_metrics(self, date: str) -> Optional[Dict[str, Any]]:
         """Get metrics for a specific date."""
-        return self.metrics.find_one({"date": date})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.metrics WHERE date = %s").format(
+                sql.Identifier(self.schema)), (date,))
+            return cur.fetchone()
 
     def get_latest_metrics(self) -> Optional[Dict[str, Any]]:
         """Get the latest metrics."""
-        return self.metrics.find_one(sort=[("date", -1)])
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT * FROM {}.metrics
+                ORDER BY date DESC
+                LIMIT 1
+            """).format(sql.Identifier(self.schema)))
+            return cur.fetchone()
 
     # ========== AutoEvolution Operations ==========
 
     def get_auto_evolution_status(self) -> Dict[str, Any]:
         """Get auto evolution status."""
-        status = self.auto_evolution.find_one({"_id": "status"})
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("SELECT * FROM {}.auto_evolution WHERE id = 'status'").format(
+                sql.Identifier(self.schema)))
+            status = cur.fetchone()
+
         if not status:
             return {
                 "enabled": True,
@@ -580,21 +1368,43 @@ class MongoDBService:
     def update_auto_evolution_status(self, updates: Dict[str, Any]) -> bool:
         """Update auto evolution status."""
         updates["updated_at"] = datetime.utcnow().isoformat()
-        result = self.auto_evolution.update_one(
-            {"_id": "status"},
-            {"$set": updates},
-            upsert=True
-        )
-        return result.modified_count > 0
+
+        if 'retrain_status' in updates and hasattr(updates['retrain_status'], 'value'):
+            updates['retrain_status'] = updates['retrain_status'].value
+
+        set_clauses = []
+        params = {'id': 'status'}
+        for k, v in updates.items():
+            set_clauses.append(f"{k} = %({k})s")
+            params[k] = v
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                UPDATE {}.auto_evolution
+                SET {}
+                WHERE id = 'status'
+            """).format(
+                sql.Identifier(self.schema),
+                sql.SQL(', '.join(set_clauses))
+            ), params)
+
+            if cur.rowcount == 0:
+                # Insert if not exists
+                params['id'] = 'status'
+                placeholders = ', '.join([f"%({k})s" for k in params.keys()])
+                cur.execute(sql.SQL(f"""
+                    INSERT INTO {self.schema}.auto_evolution (id, {', '.join(params.keys())})
+                    VALUES ({placeholders})
+                """).as_string(self._conn), params)
+
+            return True
 
     # ========== System Status ==========
 
     def get_system_ready_status(self) -> Dict[str, Any]:
         """Get system ready status."""
-        # Count entities
-        entity_count = self.entities.count_documents({})
+        entity_count = self.get_total_entities_count()
 
-        # Check bootstrap progress (simplified)
         bootstrap_progress = min(100, int(entity_count / 100))
 
         return {
@@ -632,11 +1442,17 @@ class MongoDBService:
 
     def close(self) -> None:
         """Close database connection."""
-        self.client.close()
+        if self._conn:
+            self._conn.close()
+            self._conn = None
 
     @classmethod
-    def get_instance(cls) -> 'MongoDBService':
+    def get_instance(cls) -> 'PostgreSQLService':
         """Get singleton instance."""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+
+# Alias for backward compatibility
+MongoDBService = PostgreSQLService

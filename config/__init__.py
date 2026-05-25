@@ -50,6 +50,15 @@ class MongoDBConfig:
 
 
 @dataclass
+class PostgreSQLConfig:
+    host: str = "localhost"
+    port: int = 5432
+    user: str = "antiblack"
+    password: str = "antiblack123"
+    database: str = "antiblack"
+
+
+@dataclass
 class KafkaConfig:
     bootstrap_servers: str = "localhost:9092"
     consumer_group: str = "antiblack_pipeline"
@@ -152,6 +161,12 @@ class Config:
     @property
     def mongodb(self) -> MongoDBConfig:
         return MongoDBConfig(**self._config.get('mongodb', {}))
+
+    @property
+    def postgresql(self) -> PostgreSQLConfig:
+        # Use lightrag.postgresql config which already has the correct connection settings
+        pg_config = self._config.get('lightrag', {}).get('postgresql', {})
+        return PostgreSQLConfig(**pg_config)
 
     @property
     def kafka(self) -> KafkaConfig:

@@ -245,10 +245,10 @@ channels:
       enabled: false
     - platform: "baidu_tieba"
       category: "social"
-      enabled: false
+      enabled: true
     - platform: "douyin"
       category: "social"
-      enabled: false
+      enabled: true
     - platform: "rednote"
       category: "social"
       enabled: false
@@ -264,6 +264,38 @@ channels:
     - platform: "tech_forum"
       category: "vertical"
       enabled: false
+
+# MediaCrawler Configuration
+media_crawler:
+  enabled: true
+  # Database connection (MediaCrawler's PostgreSQL on remote VM)
+  database:
+    host: "${POSTGRES_HOST}"
+    port: 5432
+    user: "antiblack"
+    password: "antiblack123"
+    database: "antiblack"
+  # Polling interval in seconds
+  poll_interval: 60
+  # Platforms to crawl
+  platforms:
+    - name: "douyin"
+      keywords:
+        - "出抖号"
+        - "抖音号买卖"
+        - "加V"
+        - "千粉"
+        - "微信号"
+      enabled: true
+    - name: "baidu_tieba"
+      keywords:
+        - "出抖号"
+        - "抖音号买卖"
+        - "加微"
+        - "刷粉"
+      enabled: true
+  #采集评论
+  enable_comments: true
 
 # Monitoring Configuration
 monitoring:

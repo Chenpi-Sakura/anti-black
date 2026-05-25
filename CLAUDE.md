@@ -60,10 +60,9 @@ collector (采集) → cleaner (清洗) → classifier (分类) → extractor (�
 
 ### External Dependencies
 
-- **MongoDB**: Primary database for entities, clues, feedback
+- **PostgreSQL**: Primary database for AntiBlack (antiblack schema) and MediaCrawler (media_crawler schema)
 - **Kafka**: Message queue for pipeline (raw.messages → cleaned.messages → deep.analysis.tasks)
 - **Neo4j**: Graph storage for LightRAG entity relations
-- **PostgreSQL**: Vector storage for LightRAG
 - **Redis**: Caching layer
 - **LLM**: MiniMax-M2.7 (primary), qwen3.6-flash (backup)
 - **VLM**: DashScope qwen3.6-27b (cloud)
