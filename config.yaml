@@ -103,7 +103,7 @@ lightrag:
     max_token_size: 8192
   # Storage Backend
   storage:
-    graph: "Neo4jStorage"
+    graph: "Neo4JStorage"
     vector: "PGVectorStorage"
     kv: "PGKVStorage"
     doc_status: "PGDocStatusStorage"

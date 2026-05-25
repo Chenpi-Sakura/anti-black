@@ -2,10 +2,86 @@
 LightRAG integration for AntiBlack pipeline.
 Handles deep channel processing with knowledge graph construction.
 """
+import os
 import logging
 from typing import Any, Dict, List, Optional
+from functools import partial
 
 logger = logging.getLogger(__name__)
+
+
+def create_minimax_complete():
+    """Create MiniMax LLM completion function (OpenAI-compatible)."""
+    from openai import AsyncOpenAI
+
+    async def minimax_complete(
+        prompt,
+        system_prompt=None,
+        history_messages=None,
+        enable_cot: bool = False,
+        **kwargs,
+    ) -> str:
+        if history_messages is None:
+            history_messages = []
+
+        api_key = os.environ.get("OPENAI_API_KEY")
+        api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
+        model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
+
+        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
+        for msg in history_messages:
+            messages.append(msg)
+
+        messages.append({"role": "user", "content": prompt})
+
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                timeout=120
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"MiniMax API call failed: {e}")
+            return f"Error: {str(e)}"
+
+    return minimax_complete
+
+
+def create_ollama_embed():
+    """Create Ollama embedding function (using bge-m3 model)."""
+    from openai import AsyncOpenAI
+    import numpy as np
+
+    api_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+    api_key = os.environ.get("OLLAMA_API_KEY", "ollama")  # Ollama doesn't need real key
+    model = os.environ.get("OLLAMA_EMBEDDING_MODEL", "bge-m3:latest")
+
+    async def ollama_embed(
+        texts: list[str],
+        model_name: str = model,
+        **kwargs,
+    ) -> np.ndarray:
+        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+
+        try:
+            response = await client.embeddings.create(
+                model=model_name,
+                input=texts
+            )
+            embeddings = [item.embedding for item in response.data]
+            return np.array(embeddings)
+        except Exception as e:
+            logger.error(f"Ollama embedding failed: {e}")
+            # Return zeros on error
+            return np.zeros((len(texts), 1024))
+
+    return ollama_embed
 
 
 class LightRAGIntegrator:
@@ -23,23 +99,69 @@ class LightRAGIntegrator:
 
         try:
             from lightrag import LightRAG
-            from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
 
             # Get LightRAG config
             lightrag_config = self.config.get('lightrag', {})
             working_dir = lightrag_config.get('working_dir', './rag_storage')
 
-            # Initialize LightRAG
+            # Get storage config
+            storage_config = lightrag_config.get('storage', {})
+            neo4j_config = lightrag_config.get('neo4j', {})
+            pg_config = lightrag_config.get('postgresql', {})
+
+            # Build vector_db_storage_cls_kwargs for PGVectorStorage
+            vector_db_kwargs = {}
+            if pg_config.get('host'):
+                vector_db_kwargs["host"] = pg_config.get('host')
+                vector_db_kwargs["port"] = pg_config.get('port', 5432)
+                vector_db_kwargs["user"] = pg_config.get('user', 'antiblack')
+                vector_db_kwargs["password"] = pg_config.get('password', 'antiblack123')
+                vector_db_kwargs["database"] = pg_config.get('database', 'antiblack')
+
+            # Build addon_params for Neo4j and other storages
+            addon_params = {
+                "neo4j": {
+                    "uri": neo4j_config.get('uri', 'bolt://localhost:7687'),
+                    "username": neo4j_config.get('username', 'neo4j'),
+                    "password": neo4j_config.get('password', 'neo4j123'),
+                },
+                "pg": {
+                    "host": pg_config.get('host', 'localhost'),
+                    "port": pg_config.get('port', 5432),
+                    "user": pg_config.get('user', 'antiblack'),
+                    "password": pg_config.get('password', 'antiblack123'),
+                    "database": pg_config.get('database', 'antiblack'),
+                }
+            }
+
+            # Initialize LightRAG with remote storage backends
+            # LLM: MiniMax (OpenAI-compatible)
+            # Embedding: Ollama bge-m3 (local)
+            from lightrag.utils import EmbeddingFunc
+
             self._rag = LightRAG(
                 working_dir=working_dir,
-                llm_model_func=gpt_4o_mini_complete,
-                embedding_func=openai_embed
+                llm_model_func=create_minimax_complete(),
+                embedding_func=EmbeddingFunc(
+                    embedding_dim=1024,  # bge-m3 outputs 1024 dim
+                    max_token_size=8192,
+                    func=create_ollama_embed(),
+                ),
+                # Storage backends (use correct storage names)
+                kv_storage=storage_config.get('kv', 'PGKVStorage'),
+                vector_storage=storage_config.get('vector', 'PGVectorStorage'),
+                graph_storage=storage_config.get('graph', 'Neo4JStorage'),
+                doc_status_storage=storage_config.get('doc_status', 'PGDocStatusStorage'),
+                # Storage connection kwargs
+                vector_db_storage_cls_kwargs=vector_db_kwargs,
+                # Pass connection info via addon_params
+                addon_params=addon_params,
             )
 
             # Initialize storage backends
             await self._rag.initialize_storages()
             self._initialized = True
-            logger.info("LightRAG initialized successfully")
+            logger.info("LightRAG initialized successfully with remote storage")
         except Exception as e:
             logger.error(f"Failed to initialize LightRAG: {e}")
             self._rag = None

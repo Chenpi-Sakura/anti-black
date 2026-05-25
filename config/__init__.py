@@ -15,7 +15,7 @@ def _load_env_file(env_path: str = ".env") -> None:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         env_path = os.path.join(base_dir, ".env")
     if os.path.exists(env_path):
-        with open(env_path, 'r') as f:
+        with open(env_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
@@ -67,6 +67,7 @@ class KafkaConfig:
 class LightRAGConfig:
     working_dir: str = "./rag_storage"
     llm: Dict[str, Any] = field(default_factory=dict)
+    llm_backup: Dict[str, Any] = field(default_factory=dict)
     embedding: Dict[str, Any] = field(default_factory=dict)
     storage: Dict[str, str] = field(default_factory=dict)
     neo4j: Dict[str, str] = field(default_factory=dict)
