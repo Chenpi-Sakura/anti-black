@@ -4,7 +4,7 @@
 services:
   # MongoDB 8.0 - 主数据库
   mongodb:
-    image: mongo:8.0
+    image: mongo:8.0.23-noble
     container_name: antiblack-mongodb
     restart: unless-stopped
     ports:
@@ -23,7 +23,7 @@ services:
 
   # Kafka 4.2 with KRaft mode (no Zookeeper needed)
   kafka:
-    image: apache/kafka:4.2
+    image: apache/kafka:4.3.0
     container_name: antiblack-kafka
     restart: unless-stopped
     ports:
@@ -34,7 +34,7 @@ services:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.0.147:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
@@ -54,7 +54,7 @@ services:
 
   # Neo4j 5.26.26 (LTS) - 图数据库
   neo4j:
-    image: neo4j:5.26.26
+    image: neo4j:5.26.26-community
     container_name: antiblack-neo4j
     restart: unless-stopped
     ports:
@@ -81,7 +81,7 @@ services:
 
   # PostgreSQL 17 + pgvector
   postgres:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector:0.8.2-pg17
     container_name: antiblack-postgres
     restart: unless-stopped
     ports:
@@ -102,7 +102,7 @@ services:
 
   # Redis 7.2.14-alpine - 缓存
   redis:
-    image: redis:7.2.14-alpine
+    image: redis:7.4.9
     container_name: antiblack-redis
     restart: unless-stopped
     ports:
