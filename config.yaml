@@ -39,12 +39,19 @@ kafka:
     retries: 3
     batch_size: 16384
 
-# Ollama Configuration (VLM and Embedding only - LLM uses cloud)
-ollama:
+# Cloud VLM Configuration (阿里百炼, 临时使用直到Ollama配置完成)
+cloud_vlm:
   enabled: true
+  api_base: "${VLM_API_BASE}"
+  api_key: "${DASHSCOPE_API_KEY}"
+  model: "${VLM_MODEL}"  # qwen3.6-27b
+
+# Ollama Configuration (VLM and Embedding - 后续启用)
+ollama:
+  enabled: false
   base_url: "http://localhost:11434"
-  vlm_model: "qwen2-vl:2b"  # Vision language model for image understanding
-  embedding_model: "nomic-embed-text"  # Optional: if using Ollama for embeddings
+  vlm_model: "qwen3.6"  # Vision language model for image understanding
+  embedding_model: "bge-m3"  # Ollama embedding model
 
 # Local Models Configuration
 local_models:
@@ -75,11 +82,18 @@ local_models:
 # LightRAG Configuration (uses cloud LLM)
 lightrag:
   working_dir: "./rag_storage"
-  # LLM Settings (MiniMax OpenAI-compatible API)
+  # LLM Settings (MiniMax Primary)
   llm:
     api_base: "${LLM_API_BASE}"
     api_key: "${OPENAI_API_KEY}"
     model: "${LLM_MODEL}"
+    max_tokens: 8192
+    temperature: 0.0
+  # LLM Backup Settings (DashScope Qwen)
+  llm_backup:
+    api_base: "${LLM_BACKUP_API_BASE}"
+    api_key: "${DASHSCOPE_API_KEY}"
+    model: "${LLM_BACKUP_MODEL}"
     max_tokens: 8192
     temperature: 0.0
   # Embedding Settings (local via sentence-transformers or Ollama)

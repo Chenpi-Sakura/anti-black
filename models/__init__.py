@@ -8,6 +8,7 @@ from .classifier import ClassificationModel
 from .fasttext import FastTextModel
 from .ocr import OCRModel
 from .ollama_client import OllamaClient
+from .cloud_vlm_client import CloudVLMClient
 from .model_manager import ModelManager, get_model_manager, init_models
 from .entities import (
     Entity, MessageRef, SlangMapping, SlangCandidate, QueryTask, Clue,
@@ -23,6 +24,7 @@ __all__ = [
     'FastTextModel',
     'OCRModel',
     'OllamaClient',
+    'CloudVLMClient',
     'ModelManager',
     'get_model_manager',
     'init_models',

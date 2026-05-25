@@ -34,6 +34,7 @@ class ModelManager:
         self._fasttext_model = None
         self._ocr_model = None
         self._ollama_client = None
+        self._cloud_vlm_client = None
         self._config = None
         self._initialized = True
         logger.info("ModelManager initialized")
@@ -42,7 +43,19 @@ class ModelManager:
         """Initialize models from config dict."""
         self._config = config
 
-        # Initialize Ollama client
+        # Initialize Cloud VLM client (优先使用云端VLM)
+        cloud_vlm_cfg = config.get('cloud_vlm', {})
+        if cloud_vlm_cfg.get('enabled', False):
+            from .cloud_vlm_client import CloudVLMClient
+            self._cloud_vlm_client = CloudVLMClient(
+                api_base=cloud_vlm_cfg.get('api_base', 'https://dashscope.aliyuncs.com/compatible-mode/v1'),
+                api_key=cloud_vlm_cfg.get('api_key'),
+                model=cloud_vlm_cfg.get('model', 'qwen2.5-vl-32b'),
+                timeout=cloud_vlm_cfg.get('timeout', 120)
+            )
+            logger.info("Cloud VLM client initialized")
+
+        # Initialize Ollama client (VLM和Embedding备选)
         ollama_cfg = config.get('ollama', {})
         if ollama_cfg.get('enabled', False):
             from .ollama_client import OllamaClient
@@ -122,6 +135,23 @@ class ModelManager:
             logger.info("Ollama client created (lazy loading)")
         return self._ollama_client
 
+    @property
+    def cloud_vlm(self):
+        """Get or create Cloud VLM client."""
+        if self._cloud_vlm_client is None:
+            from .cloud_vlm_client import CloudVLMClient
+            self._cloud_vlm_client = CloudVLMClient()
+            logger.info("Cloud VLM client created (lazy loading)")
+        return self._cloud_vlm_client
+
+    def get_vlm_client(self):
+        """Get the best available VLM client (cloud优先)."""
+        if self._cloud_vlm_client is not None:
+            return self._cloud_vlm_client
+        if self._ollama_client is not None:
+            return self._ollama_client
+        return None
+
     def load_all(self):
         """Pre-load all models."""
         logger.info("Loading all models...")
@@ -148,6 +178,7 @@ class ModelManager:
             'fasttext': self._fasttext_model is not None,
             'ocr': self._ocr_model is not None,
             'ollama': self._ollama_client is not None,
+            'cloud_vlm': self._cloud_vlm_client is not None,
         }
 
 
