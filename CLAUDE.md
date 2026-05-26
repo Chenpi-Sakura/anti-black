@@ -12,9 +12,10 @@ AntiBlack is a 黑灰产情报分析Agent系统 (Black-market Intelligence Analy
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the API server
-python main.py
+# Run the API server (FastAPI)
+conda run -n anti-black python -m uvicorn api:app --reload --port 8000
 # Server starts on http://127.0.0.1:8000
+# API docs at http://127.0.0.1:8000/docs
 
 # Run tests
 pytest tests/ -v
@@ -37,27 +38,18 @@ cd docker-deploy && ./start.sh
 ### Core Components
 
 ```
-api/                   # FastAPI app (migrated from Flask)
+api/                   # FastAPI application
 api/__init__.py        # FastAPI app factory
 api/routes/            # FastAPI route handlers
 api/schemas/           # Pydantic request/response models
 api/deps.py            # Dependency injection (database)
 frontend/              # Vue 3 SPA (Element Plus + Pinia)
-main.py                # Entry point (Flask legacy, use uvicorn for FastAPI)
 config/__init__.py     # Config singleton loading from config.yaml + .env
 ```
 
 ### API Server
 
-```bash
-# FastAPI server (new)
-conda run -n anti-black python -m uvicorn api:app --reload --port 8000
-
-# Flask server (legacy, being deprecated)
-python main.py
-```
-
-FastAPI Swagger UI: http://127.0.0.1:8000/docs
+FastAPI with automatic OpenAPI docs at http://127.0.0.1:8000/docs
 
 ### Pipeline Flow
 
