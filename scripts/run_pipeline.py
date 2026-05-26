@@ -140,7 +140,7 @@ async def main():
 
     # Step 6.5: Insert clues into database
     logger.info("\n[Step 6.5] Inserting clues into database...")
-    from models.entities import Clue
+    from models.entities import Clue, SlangStatus
     from utils import generate_id
     from datetime import datetime
     clues_inserted = 0
@@ -246,7 +246,10 @@ async def main():
                         "level1_label": classification_results[i].level1_label,
                         "level2_label": classification_results[i].level2_label
                     },
-                    "entities": []
+                    "entities": [
+                        {"entity_type": e.entity_type, "entity_value": e.raw_value}
+                        for e in extraction_results[i].entities
+                    ]
                 })
         await graph_processor.finalize()
         logger.info(f"LightRAG processing completed")
@@ -255,7 +258,9 @@ async def main():
 
     # Step 8: Slang learning (evolution)
     logger.info("\n[Step 8] Running slang learning...")
-    slang_learner = SlangLearner(config)
+    # 加载已有 slang mappings，避免重复学习
+    existing_mappings = {m['slang_raw']: m['meaning'] for m in pg_db.get_all_slang_mappings()}
+    slang_learner = SlangLearner(config, slang_mappings=existing_mappings)
     for msg in cleaned_messages:
         slang_learner.process_text(msg.cleaned_text, source_channel=msg.source_channel)
 
@@ -263,6 +268,30 @@ async def main():
     confirmed = await slang_learner.validate_pending_candidates()
     if confirmed:
         logger.info(f"LLM validated {len(confirmed)} new CONFIRMED slang")
+        # 持久化 confirmed slang 到 DB
+        for candidate in confirmed:
+            db_candidate = DBSlangCandidate(
+                candidate_word=candidate.word,
+                contexts=[text for _, text in candidate.contexts],
+                occurrence_count=candidate.occurrence_count,
+                status=SlangStatus.CONFIRMED,
+                inference_count=candidate.inference_count,
+                regex_pattern=candidate.regex_pattern,
+                meaning=candidate.meaning,
+                source_channel=candidate.source_channel
+            )
+            pg_db.upsert_slang_candidate(db_candidate)
+            db_mapping = DBSlangMapping(
+                mapping_id=generate_id("slang"),
+                slang_raw=candidate.word,
+                meaning=candidate.meaning,
+                regex_pattern=candidate.regex_pattern,
+                source='learned',
+                verified=True,
+                confidence=1.0
+            )
+            pg_db.upsert_slang_mapping(db_mapping)
+            logger.info(f"  Persisted slang: {candidate.word} -> {candidate.meaning}")
 
     stats = slang_learner.get_candidate_stats()
     logger.info(f"Slang learning stats: {stats}")

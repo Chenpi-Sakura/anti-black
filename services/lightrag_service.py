@@ -360,3 +360,76 @@ class GraphProcessor:
     ) -> Dict[str, Any]:
         """Query the knowledge graph."""
         return await self.lightrag.query(query, mode, top_k)
+
+    async def get_entity_profile(self, entity_value: str, entity_type: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Query entity profile with all relations from PostgreSQL + LightRAG.
+
+        Args:
+            entity_value: Entity raw value (e.g., "dyhao668")
+            entity_type: Optional entity type filter (e.g., "WECHAT")
+
+        Returns:
+            Entity profile dict with entity info and rag relations, or None if not found
+        """
+        from services.database import PostgreSQLService
+        pg_db = PostgreSQLService.get_instance()
+
+        # Get entity from PostgreSQL
+        if entity_type:
+            entity = pg_db.get_entity_by_value(entity_type, entity_value)
+        else:
+            # Search across all types if no type specified
+            entity = None
+            for et in ['WECHAT', 'PHONE', 'QQ', 'URL']:
+                e = pg_db.get_entity_by_value(et, entity_value)
+                if e:
+                    entity = e
+                    break
+        if not entity:
+            return None
+
+        # Get relations from LightRAG
+        rag_result = await self.lightrag.query(
+            f"与 {entity_value} 相关的实体和关系",
+            mode="global",
+            top_k=20
+        )
+
+        return {
+            "entity": entity,
+            "relations": rag_result
+        }
+
+    async def get_kg_stats(self) -> Dict[str, int]:
+        """
+        Get knowledge graph statistics from LightRAG storage.
+
+        Returns:
+            Dict with nodes, edges, documents counts
+        """
+        from services.database import PostgreSQLService
+        pg_db = PostgreSQLService.get_instance()
+
+        try:
+            # Query node count from LightRAG entities table
+            with pg_db._get_cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM antiblack.lightrag_full_entities")
+                nodes = cur.fetchone()['count']
+
+            with pg_db._get_cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM antiblack.lightrag_full_relations")
+                edges = cur.fetchone()['count']
+
+            with pg_db._get_cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM antiblack.lightrag_doc_chunks")
+                documents = cur.fetchone()['count']
+
+            return {
+                "nodes": nodes,
+                "edges": edges,
+                "documents": documents
+            }
+        except Exception as e:
+            logger.error(f"Failed to get kg stats: {e}")
+            return {"nodes": 0, "edges": 0, "documents": 0}
