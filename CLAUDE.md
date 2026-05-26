@@ -37,10 +37,27 @@ cd docker-deploy && ./start.sh
 ### Core Components
 
 ```
-api/server.py          # Flask app factory, registers all blueprints under /api/v1
-main.py                # Entry point, creates log dir and starts server
-config/__init__.py    # Config singleton loading from config.yaml + .env
+api/                   # FastAPI app (migrated from Flask)
+api/__init__.py        # FastAPI app factory
+api/routes/            # FastAPI route handlers
+api/schemas/           # Pydantic request/response models
+api/deps.py            # Dependency injection (database)
+frontend/              # Vue 3 SPA (Element Plus + Pinia)
+main.py                # Entry point (Flask legacy, use uvicorn for FastAPI)
+config/__init__.py     # Config singleton loading from config.yaml + .env
 ```
+
+### API Server
+
+```bash
+# FastAPI server (new)
+conda run -n anti-black python -m uvicorn api:app --reload --port 8000
+
+# Flask server (legacy, being deprecated)
+python main.py
+```
+
+FastAPI Swagger UI: http://127.0.0.1:8000/docs
 
 ### Pipeline Flow
 
@@ -51,7 +68,17 @@ config/__init__.py    # Config singleton loading from config.yaml + .env
                                                          /        \
                                                 light_channel  deep_channel
                                                 (规则/Regex)  (LightRAG+LLM)
+                                                              ↓
+                                                       slang_learning(进化)
 ```
+
+### SSE Streaming
+
+Query progress is streamed via Server-Sent Events (SSE) at `GET /api/v1/queries/{query_id}/stream`.
+
+Format: `data: {"type": "stage"|"progress"|"content"|"complete", ...}\n\n`
+
+Frontend connects via `EventSource` to receive real-time pipeline progress.
 
 ### Key Models (in models/)
 

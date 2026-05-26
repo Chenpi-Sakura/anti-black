@@ -1,0 +1,62 @@
+:root {
+  /* Primary Colors */
+  --color-primary: #0000FF;
+  --color-primary-light: rgba(0, 0, 255, 0.2);
+  --color-primary-subtle: rgba(0, 0, 255, 0.08);
+
+  /* Secondary Colors */
+  --color-warm-orange: #FCA17D;
+  --color-dusty-rose: #DA627D;
+  --color-deep-navy: #0D0628;
+
+  /* Neutral Colors */
+  --color-background: #FAFAFA;
+  --color-surface: #FFFFFF;
+  --color-text-primary: #0D0628;
+  --color-text-secondary: #6B6B6B;
+  --color-text-muted: #9B9B9B;
+  --color-border: #E5E5E5;
+  --color-divider: #F0F0F0;
+
+  /* Functional Colors */
+  --color-success: #2D8B57;
+  --color-warning: #FCA17D;
+  --color-error: #DA627D;
+  --color-info: #0000FF;
+
+  /* Spacing System (8px grid) */
+  --spacing-xxs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 16px;
+  --spacing-md: 24px;
+  --spacing-lg: 32px;
+  --spacing-xl: 48px;
+  --spacing-xxl: 64px;
+
+  /* Border Radius */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+
+  /* Border Width */
+  --border-thin: 0.5px;
+  --border-normal: 1px;
+
+  /* Animation */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-quint: cubic-bezier(0.64, 0, 0.78, 0);
+  --ease-in-out-quint: cubic-bezier(0.86, 0, 0.07, 1);
+  --duration-fast: 100ms;
+  --duration-normal: 200ms;
+  --duration-standard: 300ms;
+  --duration-slow: 400ms;
+
+  /* Shadows */
+  --shadow-float: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.06);
+
+  /* Font Families */
+  --font-serif: "Playfair Display", "Source Han Serif CN", "Noto Serif SC", Georgia, serif;
+  --font-sans: "Crimson Text", "Source Han Serif CN", "Noto Serif SC", serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+}
