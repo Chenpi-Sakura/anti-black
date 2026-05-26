@@ -18,6 +18,7 @@ from pipeline.slang_learning import SlangLearner
 from services.lightrag_service import GraphProcessor
 from config import get_config
 from services.database import PostgreSQLService
+from psycopg2 import sql
 
 logging.basicConfig(
     level=logging.INFO,
@@ -137,6 +138,47 @@ async def main():
         route_results.append(channel)
         logger.info(f"  [{msg.message_id}] -> {channel} channel")
 
+    # Step 6.5: Insert clues into database
+    logger.info("\n[Step 6.5] Inserting clues into database...")
+    from models.entities import Clue
+    from utils import generate_id
+    from datetime import datetime
+    clues_inserted = 0
+    for i, msg in enumerate(cleaned_messages):
+        try:
+            # Parse published_at to datetime if it's a string
+            published_at = msg.published_at
+            if isinstance(published_at, str):
+                try:
+                    published_at = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+                except (ValueError, AttributeError):
+                    published_at = None
+
+            clue = Clue(
+                clue_id=generate_id("clue"),
+                message_id=msg.message_id,
+                risk_label_level1=classification_results[i].level1_label or "未分类",
+                risk_label_level2=classification_results[i].level2_label or "其他",
+                confidence=classification_results[i].confidence,
+                classification_source=classification_results[i].source,
+                raw_text=msg.original_text,
+                cleaned_text=msg.cleaned_text,
+                classification_reason=classification_results[i].reason,
+                source_channel=msg.source_channel,
+                source_group_id=msg.group_id,
+                source_author_id=msg.author_id,
+                entity_list=[{"entity_type": e.entity_type, "entity_value": e.raw_value, "source": "extractor"} for e in extraction_results[i].entities],
+                slang_mappings=[{"slang": s.slang, "meaning": s.meaning} for s in extraction_results[i].slang_mappings],
+                query_id=None,
+                platform=msg.metadata.get("platform") if msg.metadata else None,
+                published_at=published_at
+            )
+            pg_db.insert_clue(clue)
+            clues_inserted += 1
+        except Exception as e:
+            logger.warning(f"  Failed to insert clue for {msg.message_id}: {e}")
+    logger.info(f"Inserted {clues_inserted} clues into database")
+
     # Step 7: Summary
     logger.info("\n" + "=" * 60)
     logger.info("Pipeline Summary")
@@ -153,6 +195,40 @@ async def main():
     for c in route_results:
         channel_counts[c] = channel_counts.get(c, 0) + 1
     logger.info(f"Routing breakdown: {channel_counts}")
+    logger.info(f"Clues inserted: {clues_inserted}")
+
+    # Step 6.6: Update metrics
+    logger.info("\n[Step 6.6] Updating metrics...")
+    from models.entities import Metrics
+    from datetime import date
+    today = date.today().isoformat()
+
+    # Get total entities count
+    total_entities = pg_db.get_total_entities_count()
+
+    # Get classification distribution from clues
+    with pg_db._get_cursor() as cur:
+        cur.execute(sql.SQL("""
+            SELECT risk_label_level1, COUNT(*) as count
+            FROM {}.clues
+            GROUP BY risk_label_level1
+        """).format(sql.Identifier(pg_db.schema)))
+        rows = cur.fetchall()
+        distribution = [{"risk_label_level1": row["risk_label_level1"], "count": row["count"]} for row in rows]
+
+    metrics = Metrics(
+        date=today,
+        token_usage_today=0,
+        token_remaining_percent=1.0,
+        collection_success_rate=1.0,
+        total_entities=total_entities,
+        total_relations=0,
+        messages_processed_today=clues_inserted,
+        classification_distribution=distribution,
+        channel_status=[]
+    )
+    pg_db.upsert_metrics(metrics)
+    logger.info(f"Metrics updated: {total_entities} entities, {clues_inserted} messages today")
 
     # Step 7: Process deep channel messages through LightRAG
     deep_messages = [msg for msg, channel in zip(cleaned_messages, route_results) if channel == 'deep']
