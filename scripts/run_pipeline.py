@@ -293,6 +293,17 @@ async def main():
             pg_db.upsert_slang_mapping(db_mapping)
             logger.info(f"  Persisted slang: {candidate.word} -> {candidate.meaning}")
 
+            # FR-SLANG-06: 图谱同步 - 写入 LightRAG
+            try:
+                sync_gp = GraphProcessor(config)
+                await sync_gp.initialize()
+                rag_text = f"黑话映射: {candidate.word} -> {candidate.meaning} (来源: slang_learning, regex={candidate.regex_pattern})"
+                await sync_gp.lightrag.insert(rag_text)
+                await sync_gp.finalize()
+                logger.info(f"  LightRAG sync: {candidate.word}")
+            except Exception as e:
+                logger.warning(f"  LightRAG sync failed for {candidate.word}: {e}")
+
     stats = slang_learner.get_candidate_stats()
     logger.info(f"Slang learning stats: {stats}")
 

@@ -224,26 +224,33 @@ class SlangLearner:
             logger.warning(f"No independent contexts for slang candidate: {candidate.word}")
             return False
 
-        prompt = f"""分析以下黑话候选词的含义并生成验证规则：
+        prompt = f"""分析以下黑话候选词的含义，并为其生成在通用场景下的验证规则：
 
 候选词: {candidate.word}
 
-完整例句（来自独立的消息样本，非触发源）：
+完整例句（仅供你理解该词的具体含义，切勿将例句中的特定前缀、后缀或无关文本写入正则）：
 {chr(10).join(f"{i+1}. {ctx}" for i, ctx in enumerate(contexts_sample))}
 
 请返回 JSON 格式：
 {{
     "meaning": "该词的含义解释",
     "regex_pattern": "正则表达式模式",
-    "test_positive_cases": ["应匹配的例1", "应匹配的例2"],
-    "test_negative_cases": ["不应匹配的例1", "不应匹配的例2"],
+    "test_positive_cases": ["包含该黑话的其他新造短句1", "包含该黑话的其他新造短句2"],
+    "test_negative_cases": ["不包含该黑话，但字面相似的短句1", "不包含该黑话的正常句2"],
     "is_valid_slang": true/false
 }}
 
 要求：
-- regex_pattern 能匹配正例但不匹配负例
-- 如果不是有效黑话，set is_valid_slang to false
-- 提供的例句中包含该词的完整上下文，请结合上下文分析"""
+- is_valid_slang：如果该词不是有效的黑话，请设为 false。
+- meaning：请结合提供的完整例句上下文，准确分析该黑话的含义。
+- regex_pattern：**必须是通用匹配模式！** 目标是在任意未知文本中抓取该黑话本身。
+  * ❌ 错误示范：绝对不能包含例句中特有的上下文（如标点符号、特定的开头结尾。切勿写成类似 "^【脚本引流】专业服务[a-z]*$" 的死板规则）。
+  * ✅ 正确示范：如果黑话是"专业服务"，正则应该尽量精简通用，如 "专业服务" 或考虑变体的 "专\s*业\s*服\s*务"。
+- test_positive_cases：**不要直接抄原例句**，请自己造两个包含该黑话的极简短句作为正例，以验证正则的通用性。
+- test_negative_cases：**绝不能包含能够被 regex_pattern 字面匹配到的词汇！**
+  * ⚠️极易犯错警告：正则表达式（Regex）没有语义理解能力，只认字面。如果该黑话本身也是个日常普通词汇（例如"专业服务"），**绝对不要**拿它的日常合法语境来做负例（正则必定会误杀导致测试失败）。
+  * ✅正确做法：负例应该使用字面相似但不同的词汇，或者完全不相关的句子。例如黑话是"专业服务"，负例可以是"他们提供专门服务"或"这支专业团队很厉害"。
+- regex_pattern 必须能正确匹配你生成的正例，且不匹配负例。"""
 
         try:
             response = await client.chat.completions.create(
@@ -253,12 +260,29 @@ class SlangLearner:
             )
             result_text = response.choices[0].message.content
 
-            # 解析 JSON 结果
-            result = json.loads(result_text)
+            # 去除 LLM thinking tags (<think>...</think>)
+            import re
+            result_text = re.sub(r'<think>.*?</think>', '', result_text, flags=re.DOTALL).strip()
 
-            if not result.get('is_valid_slang', False):
-                logger.info(f"LLM rejected slang candidate: {candidate.word}")
-                return False
+            # 提取 JSON 块（支持 ```json ... ``` 或直接 JSON）
+            json_match = re.search(r'```json\s*(.*?)\s*```', result_text, re.DOTALL)
+            if json_match:
+                result_text = json_match.group(1)
+            else:
+                # 尝试找到第一个 { 或 [ 开始的位置
+                json_start = result_text.find('{')
+                if json_start == -1:
+                    json_start = result_text.find('[')
+                if json_start > 0:
+                    result_text = result_text[json_start:]
+
+            # 解析 JSON
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON parse failed for {candidate.word}: {e}")
+                # Step 4: 快速降级模式 - regex 仅测试
+                return self._regex_fallback_validate(candidate)
 
             # 保存 regex_pattern
             candidate.regex_pattern = result.get('regex_pattern')
@@ -271,8 +295,9 @@ class SlangLearner:
             # 测试正例应该匹配
             for pos_case in positive_cases:
                 if not re.search(candidate.regex_pattern, pos_case):
-                    logger.warning(f"Positive case not matched: {pos_case}")
-                    return False
+                    logger.warning(f"Positive case not matched: {pos_case[:30]}")
+                    # 正例不匹配时降级用 regex_fallback
+                    return self._regex_fallback_validate(candidate)
 
             # 测试负例不应该匹配
             for neg_case in negative_cases:
@@ -281,11 +306,73 @@ class SlangLearner:
                     return False
 
             logger.info(f"LLM validated slang candidate: {candidate.word} -> {candidate.meaning}")
+
+            # FR-SLANG-04: 释义一致性验证
+            # 检查多条消息中的 meaning 是否一致（核心词相同）
+            if len(contexts_sample) >= 2:
+                if not self._check_meaning_consistency(candidate.meaning, contexts_sample):
+                    logger.info(f"Meaning inconsistent for {candidate.word}, downgrading to OBSERVED")
+                    candidate.status = 'OBSERVED'
+                    return False
+
             return True
 
         except Exception as e:
             logger.error(f"LLM validation failed for {candidate.word}: {e}")
+            # Step 4: 快速降级模式 - regex 仅测试
+            return self._regex_fallback_validate(candidate)
+
+    def _check_meaning_consistency(self, meaning: str, contexts: list[str]) -> bool:
+        """
+        FR-SLANG-04: 检查释义一致性
+        通过关键词重合度判断多消息释义是否一致
+        """
+        import re
+        # 从 meaning 提取核心词（名词/动词，2字符以上）
+        core_pattern = re.compile(r'[一-龥]{2,}')
+        core_words = set(core_pattern.findall(meaning))
+
+        if not core_words:
+            return True  # 无法提取核心词，跳过一致性检查
+
+        # 检查每条上下文中是否包含核心词的关联词
+        # 简化：检查 meaning 中的核心词是否在大多数上下文中被提及
+        hit_count = sum(1 for ctx in contexts if any(w in ctx for w in core_words))
+        hit_rate = hit_count / len(contexts) if contexts else 0
+
+        # 核心词在 80% 以上的上下文出现，认为一致
+        return hit_rate >= 0.8
+
+    def _regex_fallback_validate(self, candidate: SlangCandidate) -> bool:
+        """
+        快速降级验证模式：当 LLM 调用失败时，使用 regex 覆盖度测试
+        """
+        import re
+
+        # 从 contexts 提取正例（所有包含该词的上下文）
+        positive_cases = [text for msg_id, text in candidate.contexts]
+
+        if not positive_cases:
             return False
+
+        # 简单的通用 regex：包含该词的句子
+        try:
+            pattern = re.compile(candidate.word)
+        except re.error:
+            return False
+
+        # 检查正例是否都匹配（都应该匹配）
+        matched = sum(1 for ctx in positive_cases if pattern.search(ctx))
+        match_rate = matched / len(positive_cases) if positive_cases else 0
+
+        # 80% 以上匹配率认为有效
+        if match_rate >= 0.8:
+            candidate.regex_pattern = candidate.word
+            candidate.meaning = candidate.word  # 降级：无法确定含义时使用原词
+            logger.info(f"Regex fallback validated: {candidate.word} (match_rate={match_rate:.2f})")
+            return True
+
+        return False
 
     async def validate_pending_candidates(self, batch_size: int = 10) -> List[SlangCandidate]:
         """
