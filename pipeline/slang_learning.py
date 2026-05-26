@@ -256,6 +256,8 @@ class SlangLearner:
             response = await client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=8192,
+                extra_body={"reasoning_effort": "low"},
                 timeout=120
             )
             result_text = response.choices[0].message.content
@@ -263,6 +265,8 @@ class SlangLearner:
             # 去除 LLM thinking tags (<think>...</think>)
             import re
             result_text = re.sub(r'<think>.*?</think>', '', result_text, flags=re.DOTALL).strip()
+
+            logger.info(f"LLM raw response for {candidate.word}: {result_text[:500]}")
 
             # 提取 JSON 块（支持 ```json ... ``` 或直接 JSON）
             json_match = re.search(r'```json\s*(.*?)\s*```', result_text, re.DOTALL)
