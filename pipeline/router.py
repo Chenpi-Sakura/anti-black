@@ -8,6 +8,15 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+RISK_LABEL_TO_SCORE = {
+    '账号交易': 'HIGH',
+    '诈骗引流': 'HIGH',
+    '黑产工具': 'HIGH',
+    '流量作弊': 'MEDIUM',
+    '未知/其他': 'LOW',
+}
+
+
 class Router:
     """
     Router for deciding message processing channel.
@@ -18,16 +27,16 @@ class Router:
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
         routing_config = self.config.get('pipeline', {}).get('routing', {})
-        self.default_threshold = routing_config.get('default_threshold', 0.6)
-        self.token_adjusted_threshold = routing_config.get('token_adjusted_threshold', 0.7)
+        self.default_threshold = routing_config.get('default_threshold', 0.5)
+        self.token_adjusted_threshold = routing_config.get('token_adjusted_threshold', 0.6)
 
         # Weights for scoring
         self.weights = {
-            'risk_level': 0.3,
-            'entity_density': 0.2,
-            'semantic_complexity': 0.2,
-            'novelty': 0.15,
-            'source_authority': 0.15
+            'risk_level': 0.5,  # Increased from 0.3
+            'entity_density': 0.15,
+            'semantic_complexity': 0.15,
+            'novelty': 0.1,
+            'source_authority': 0.1
         }
 
     def route(self, message: Dict[str, Any], token_budget_percent: float = 1.0) -> str:
@@ -60,8 +69,9 @@ class Router:
         """Calculate routing score for message."""
         score = 0.0
 
-        # Risk level score
-        risk_level = message.get('risk_level', 'MEDIUM')
+        # Risk level score - convert Chinese label to score key
+        risk_label = message.get('risk_level', '未知/其他')
+        risk_level = RISK_LABEL_TO_SCORE.get(risk_label, 'LOW')
         risk_scores = {'HIGH': 1.0, 'MEDIUM': 0.5, 'LOW': 0.2, 'NORMAL': 0.0}
         score += self.weights['risk_level'] * risk_scores.get(risk_level, 0.0)
 

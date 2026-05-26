@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AntiBlack is a 黑灰产情报分析Agent系统 (Black-market Intelligence Analysis Agent System) for detecting and analyzing illegal activity signals across multiple channels (Telegram, Twitter, forums, etc.).
+AntiBlack is a 黑灰产情报分析Agent系统 (Black-market Intelligence Analysis Agent System) for detecting and analyzing illegal activity signals across multiple channels (Douyin, Tieba, forums, etc.).
 
 ## Development Commands
 
@@ -22,7 +22,13 @@ pytest tests/ -v
 # Run single test file
 pytest tests/test_classifier.py -v
 
-# Docker deployment (infrastructure only - MongoDB, Kafka, Neo4j, PostgreSQL, Redis)
+# Run full pipeline (data collection + processing)
+./run_full_pipeline.sh
+
+# Run processing pipeline only (no collection)
+conda run -n anti-black python scripts/run_pipeline.py
+
+# Docker deployment (infrastructure only - PostgreSQL, Kafka, Neo4j, Redis)
 cd docker-deploy && ./start.sh
 ```
 
@@ -39,12 +45,12 @@ config/__init__.py    # Config singleton loading from config.yaml + .env
 ### Pipeline Flow
 
 ```
-collector (采集) → cleaner (清洗) → classifier (分类) → extractor (实体抽取)
+数据采集(MediaCrawler) → cleaner(清洗) → classifier(分类) → extractor(实体抽取)
                                                               ↓
-                                                      router (分流决策)
+                                                      router(分流决策)
                                                          /        \
                                                 light_channel  deep_channel
-                                                (规则/轻量)   (LightRAG+LLM)
+                                                (规则/Regex)  (LightRAG+LLM)
 ```
 
 ### Key Models (in models/)
@@ -60,12 +66,21 @@ collector (采集) → cleaner (清洗) → classifier (分类) → extractor (�
 
 ### External Dependencies
 
-- **PostgreSQL**: Primary database for AntiBlack (antiblack schema) and MediaCrawler (media_crawler schema)
+- **PostgreSQL**: Primary database for AntiBlack (antiblack schema) and MediaCrawler (media_crawler schema) at 192.168.148.128
 - **Kafka**: Message queue for pipeline (raw.messages → cleaned.messages → deep.analysis.tasks)
-- **Neo4j**: Graph storage for LightRAG entity relations
-- **Redis**: Caching layer
+- **Neo4j**: Graph storage for LightRAG entity relations at 192.168.148.128
+- **Redis**: Caching layer at 192.168.148.128
 - **LLM**: MiniMax-M2.7 (primary), qwen3.6-flash (backup)
 - **VLM**: DashScope qwen3.6-27b (cloud)
+
+### Slang Learning (FR-SLANG-03)
+
+The slang learning module (`pipeline/slang_learning.py`) implements:
+
+- **State Machine**: NEW → OBSERVED → LIKELY → CONFIRMED → STABLE
+- **Independent Sample Principle**: When validating LIKELY→CONFIRMED, the trigger message (M1) is excluded; independent samples (M2, M3...) from other messages are used
+- **LLM Validation**: Generates regex_pattern + test_cases, validates with positive/negative examples
+- **Retry Logic**: Max 3 retries, then REJECTED with 30-day silence period
 
 ### Data Models
 
@@ -85,9 +100,11 @@ All data entities are dataclasses defined in `models/entities.py`:
 - **Docker**: Use `docker compose` (space, not hyphen)
 - **Environment execution**: Use `conda run -n <env> <command>` to run commands in conda environment without activating it
 - **Docker services** run on VM at 192.168.148.128 (MongoDB, Kafka, Neo4j, PostgreSQL, Redis)
+- **Data collection**: Uses MediaCrawler for Douyin and Tieba data collection
 - **Twitter collector** is not yet implemented - requires Twitter API credentials
 - **Telegram collector** works in mock/demo mode, needs bot_token and chat_ids to be fully functional
 - LightRAG is included as a local submodule clone in `LightRAG/` directory
+- MediaCrawler is cloned in `MediaCrawler/` directory
 
 ## User Preferences
 
