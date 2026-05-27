@@ -238,12 +238,12 @@ class Orchestrator:
                 )
 
                 if needs_tool_call and hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
-                    await self._stream_progress(query_id, "retrieving", "正在检索线索...", 30)
-
                     # 执行工具调用
                     for tool_call in assistant_message.tool_calls:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
+
+                        await self._stream_progress(query_id, "retrieving", "正在检索线索...", 30, tool_name=tool_name)
 
                         result = await self._execute_tool(tool_name, tool_args)
 
@@ -262,7 +262,8 @@ class Orchestrator:
 
                     # 获取最后一次工具调用的结果数量
                     last_result_count = tool_calls_executed[-1]['result_count']
-                    await self._stream_progress(query_id, "retrieved", f"检索完成，找到 {last_result_count} 条线索", 50)
+                    last_tool_name = tool_calls_executed[-1]['name']
+                    await self._stream_progress(query_id, "retrieved", f"工具执行完成，找到 {last_result_count} 条线索", 50, tool_name=last_tool_name)
 
                     # 继续对话，让 LLM 生成最终回复
                     continue
@@ -271,13 +272,21 @@ class Orchestrator:
                     # LLM 完成，生成最终回复
                     response_text = assistant_message.content or ""
 
+                    # 提取 thinking tags 内容
+                    thinking_matches = re.findall(r'<think>(.*?)</think>', response_text, re.DOTALL)
+                    thinking_content = "\n".join(thinking_matches).strip() if thinking_matches else ""
+
                     # 去除 thinking tags
-                    response_text = re.sub(r'<think>.*?', '', response_text, flags=re.DOTALL).strip()
+                    response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
 
                     if not response_text:
                         response_text = "处理完成，未生成有效回复。"
 
                     await self._stream_progress(query_id, "analyzing", "正在生成分析报告...", 60)
+
+                    # 如果有 thinking 内容，先发送推理过程
+                    if thinking_content:
+                        await self._stream_progress(query_id, "reasoning", thinking_content, None)
 
                     # 流式输出 LLM 生成的文本
                     for chunk in self._chunk_text(response_text):
@@ -544,7 +553,8 @@ class Orchestrator:
         stage: str,
         content: str = None,
         progress: int = None,
-        data: dict = None
+        data: dict = None,
+        tool_name: str = None
     ):
         """推送SSE进度事件"""
         event = {
@@ -556,6 +566,8 @@ class Orchestrator:
             event["progress"] = progress
         if data is not None:
             event["data"] = data
+        if tool_name is not None:
+            event["tool_name"] = tool_name
 
         put_progress(query_id, event)
 

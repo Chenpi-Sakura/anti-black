@@ -2,7 +2,7 @@
 FastAPI routes package for AntiBlack API
 """
 from fastapi import APIRouter
-from api.routes import queries, clues, entities, feedback, system, taxonomy, metrics, evolution, export, channels, seed_words
+from api.routes import queries, clues, entities, feedback, system, taxonomy, metrics, evolution, export, channels, seed_words, conversations
 
 router = APIRouter(prefix="/api/v1")
 
@@ -17,3 +17,4 @@ router.include_router(evolution.router, tags=["自进化"])
 router.include_router(export.router, tags=["导出"])
 router.include_router(channels.router, tags=["渠道"])
 router.include_router(seed_words.router, tags=["种子词"])
+router.include_router(conversations.router, tags=["对话"])

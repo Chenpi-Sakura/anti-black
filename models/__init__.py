@@ -13,6 +13,7 @@ from .model_manager import ModelManager, get_model_manager, init_models
 from .entities import (
     Entity, MessageRef, SlangMapping, SlangCandidate, QueryTask, Clue,
     Feedback, SeedWord, Proposal, ExportTask, Channel, Metrics, AutoEvolution,
+    Conversation,
     EntityType, RiskLevel, SourceChannel, ClassificationSource, QueryStatus,
     ExportStatus, PatrolStatus, SystemStatus, SlangStatus, SeedWordStatus, RetrainStatus
 )
@@ -42,6 +43,7 @@ __all__ = [
     'Channel',
     'Metrics',
     'AutoEvolution',
+    'Conversation',
     'EntityType',
     'RiskLevel',
     'SourceChannel',

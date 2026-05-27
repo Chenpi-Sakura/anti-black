@@ -91,4 +91,16 @@ export const seedWordApi = {
     api.post(`/seed-words/${word}/promote`)
 }
 
+// Conversation APIs
+export const conversationApi = {
+  create: (data) =>
+    api.post('/conversations', data),
+  list: (limit = 50) =>
+    api.get('/conversations', { params: { limit } }),
+  get: (conversationId) =>
+    api.get(`/conversations/${conversationId}`),
+  update: (conversationId, data) =>
+    api.put(`/conversations/${conversationId}`, data)
+}
+
 export default api

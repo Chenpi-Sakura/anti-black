@@ -74,10 +74,11 @@ onMounted(async () => {
 
 <style scoped>
 .app-container {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: var(--color-background);
+  overflow: hidden;
 }
 
 .app-header {
@@ -168,7 +169,11 @@ onMounted(async () => {
 
 .app-main {
   flex: 1;
-  padding: var(--spacing-lg);
+  padding: var(--spacing-sm);
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-footer {

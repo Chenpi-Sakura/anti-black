@@ -15,7 +15,8 @@ from config import get_config
 from models import (
     Entity, MessageRef, SlangMapping, SlangCandidate, QueryTask, Clue,
     Feedback, SeedWord, Proposal, ExportTask, Channel, Metrics, AutoEvolution,
-    EntityType, QueryStatus, ExportStatus, SlangStatus, SeedWordStatus, RetrainStatus
+    EntityType, QueryStatus, ExportStatus, SlangStatus, SeedWordStatus, RetrainStatus,
+    Conversation
 )
 
 logger = logging.getLogger(__name__)
@@ -293,6 +294,18 @@ class PostgreSQLService:
                 last_retrain_at TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT NOW()
             )
+            """,
+
+            # conversations table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.conversations (
+                conversation_id VARCHAR(255) PRIMARY KEY,
+                title VARCHAR(255),
+                messages JSONB DEFAULT '[]',
+                timeline JSONB DEFAULT '[]',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
             """
         ]
 
@@ -350,6 +363,9 @@ class PostgreSQLService:
             # ExportTask indexes
             (f"CREATE INDEX IF NOT EXISTS idx_exports_status ON {schema}.exports(status)",),
             (f"CREATE INDEX IF NOT EXISTS idx_exports_created_at ON {schema}.exports(created_at)",),
+
+            # Conversation indexes
+            (f"CREATE INDEX IF NOT EXISTS idx_conversations_created_at ON {schema}.conversations(created_at DESC)",),
         ]
 
         with self._get_cursor() as cur:
@@ -1445,6 +1461,91 @@ class PostgreSQLService:
         if self._conn:
             self._conn.close()
             self._conn = None
+
+    # ========== Conversation Operations ==========
+
+    def create_conversation(self, conversation: 'Conversation') -> str:
+        """Create a new conversation."""
+        doc = conversation.to_dict()
+        conversation_id = doc.pop("conversation_id")
+
+        for dt_field in ['created_at', 'updated_at']:
+            if isinstance(doc.get(dt_field), datetime):
+                doc[dt_field] = doc[dt_field].isoformat()
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.conversations
+                (conversation_id, title, messages, timeline, created_at, updated_at)
+                VALUES (%(conversation_id)s, %(title)s, %(messages)s, %(timeline)s, %(created_at)s, %(updated_at)s)
+            """).format(sql.Identifier(self.schema)), {
+                'conversation_id': conversation_id,
+                'title': doc.get('title', ''),
+                'messages': Json(doc.get('messages', [])),
+                'timeline': Json(doc.get('timeline', [])),
+                'created_at': doc.get('created_at'),
+                'updated_at': doc.get('updated_at'),
+            })
+
+        return conversation_id
+
+    def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
+        """Get a conversation by ID."""
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT conversation_id, title, messages, timeline, created_at, updated_at
+                FROM {}.conversations
+                WHERE conversation_id = %(conversation_id)s
+            """).format(sql.Identifier(self.schema)), {
+                'conversation_id': conversation_id
+            })
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def list_conversations(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """List conversations ordered by created_at desc."""
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT conversation_id, title, created_at, updated_at
+                FROM {}.conversations
+                ORDER BY created_at DESC
+                LIMIT %(limit)s
+            """).format(sql.Identifier(self.schema)), {
+                'limit': limit
+            })
+            rows = cur.fetchall()
+            return [dict(row) for row in rows]
+
+    def update_conversation(self, conversation_id: str, messages: list = None, timeline: list = None, title: str = None) -> bool:
+        """Update a conversation."""
+        updates = []
+        values = {'conversation_id': conversation_id}
+
+        if messages is not None:
+            updates.append("messages = %(messages)s")
+            values['messages'] = Json(messages)
+
+        if timeline is not None:
+            updates.append("timeline = %(timeline)s")
+            values['timeline'] = Json(timeline)
+
+        if title is not None:
+            updates.append("title = %(title)s")
+            values['title'] = title
+
+        if not updates:
+            return False
+
+        updates.append("updated_at = NOW()")
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                UPDATE {}.conversations
+                SET {}
+                WHERE conversation_id = %(conversation_id)s
+            """).format(sql.Identifier(self.schema), sql.SQL(", ").join(sql.SQL(u) for u in updates)), values)
+
+        return True
 
     @classmethod
     def get_instance(cls) -> 'PostgreSQLService':

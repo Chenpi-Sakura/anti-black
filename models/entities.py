@@ -532,3 +532,24 @@ class AutoEvolution:
             "last_retrain_at": self.last_retrain_at.isoformat() if self.last_retrain_at else None,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at
         }
+
+
+@dataclass
+class Conversation:
+    """Conversation session for query history."""
+    conversation_id: str
+    title: str = ""
+    messages: List[Dict[str, Any]] = field(default_factory=list)
+    timeline: List[Dict[str, Any]] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "conversation_id": self.conversation_id,
+            "title": self.title,
+            "messages": self.messages,
+            "timeline": self.timeline,
+            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
+            "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at
+        }
