@@ -37,18 +37,12 @@ def put_progress(query_id: str, event: dict) -> None:
 
 
 @router.post("", response_model=dict, status_code=201)
-def create_query(
+async def create_query(
     data: QueryCreate,
     db=Depends(get_db)
 ):
-    """Create a new query task."""
+    """Create a new query task and start async orchestrator."""
     query_id = generate_id("qry")
-
-    # Parse intent from query text
-    parsed_intent = _parse_intent(data.query_text)
-
-    # Create execution plan
-    execution_plan = _create_execution_plan(data)
 
     # Create query task
     from models.entities import QueryTask, QueryStatus
@@ -56,8 +50,8 @@ def create_query(
         query_id=query_id,
         query_text=data.query_text,
         status=QueryStatus.PENDING,
-        parsed_intent=parsed_intent,
-        execution_plan=execution_plan,
+        parsed_intent=None,
+        execution_plan=None,
         realtime_fetch=data.realtime_fetch,
         channels=data.channels,
         time_range=data.time_range,
@@ -72,11 +66,39 @@ def create_query(
     # Initialize progress queue for SSE
     get_progress_queue(query_id)
 
+    # Start async orchestrator task (non-blocking)
+    asyncio.create_task(_run_orchestrator(query_id, data))
+
     return format_success_response({
         "query_id": query_id,
-        "status": "PENDING",
-        "parsed_intent": parsed_intent
+        "status": "PROCESSING"
     })
+
+
+async def _run_orchestrator(query_id: str, data: QueryCreate):
+    """Run orchestrator in background and push progress to SSE queue."""
+    from services.orchestrator import Orchestrator
+
+    try:
+        orchestrator = Orchestrator()
+
+        # Call the orchestrator (it pushes events via put_progress internally)
+        await orchestrator.process_query(
+            query_id=query_id,
+            query_text=data.query_text,
+            context=[],  # TODO: 支持多轮对话
+            realtime_fetch=data.realtime_fetch,
+            channels=data.channels or ['douyin', 'baidu_tieba'],
+            time_range=data.time_range,
+            risk_types=data.risk_types,
+            platforms=data.platforms
+        )
+
+    except Exception as e:
+        put_progress(query_id, {
+            "type": "error",
+            "content": f"处理失败: {str(e)}"
+        })
 
 
 @router.get("/{query_id}", response_model=dict)
@@ -103,6 +125,7 @@ async def stream_query_status(query_id: str):
     - stage: stage identifier
     - content: display content
     - progress: 0-100
+    - data: optional payload (e.g., clue list)
     """
     async def event_generator():
         queue = get_progress_queue(query_id)
@@ -127,56 +150,3 @@ async def stream_query_status(query_id: str):
         event_generator(),
         media_type="text/event-stream"
     )
-
-
-def _parse_intent(query_text: str) -> dict:
-    """Parse intent from query text."""
-    from utils import parse_time_range, parse_platform, parse_risk_type
-
-    start_time, end_time = parse_time_range(query_text)
-    platforms = parse_platform(query_text)
-    risk_types = parse_risk_type(query_text)
-    keywords = _extract_keywords(query_text)
-
-    time_range = {}
-    if start_time:
-        time_range['start_time'] = start_time
-    if end_time:
-        time_range['end_time'] = end_time
-
-    return {
-        "time_range": time_range if time_range else None,
-        "risk_types": risk_types,
-        "platforms": platforms,
-        "keywords": keywords
-    }
-
-
-def _extract_keywords(text: str) -> list[str]:
-    """Extract business keywords from query text."""
-    keyword_patterns = [
-        r'出号', r'换绑', r'租号', r'千粉', r'万粉',
-        r'加V', r'微信号', r'抖音号', r'快手号',
-        r'刷粉', r'刷赞', r'刷量', r'接码',
-        r'群控', r'脚本', r'养号'
-    ]
-
-    keywords = []
-    for pattern in keyword_patterns:
-        if pattern in text:
-            keywords.append(pattern)
-
-    return keywords
-
-
-def _create_execution_plan(data: QueryCreate) -> dict:
-    """Create execution plan based on request."""
-    channels = data.channels if data.channels else ['telegram', 'forum']
-    fetch_mode = 'local_plus_realtime' if data.realtime_fetch else 'local_only'
-
-    return {
-        "fetch_mode": fetch_mode,
-        "target_channels": channels,
-        "estimated_cost_level": "medium",
-        "estimated_finish_seconds": 120
-    }

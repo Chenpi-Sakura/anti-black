@@ -10,7 +10,9 @@ export const queryApi = {
   create: (queryText, options = {}) =>
     api.post('/queries', { query_text: queryText, ...options }),
   getStatus: (queryId) =>
-    api.get(`/queries/${queryId}`)
+    api.get(`/queries/${queryId}`),
+  stream: (queryId) =>
+    new EventSource(`/api/v1/queries/${queryId}/stream`)
 }
 
 // Clue APIs
