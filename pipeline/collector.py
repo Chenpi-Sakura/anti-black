@@ -46,51 +46,59 @@ class BaseCollector(ABC):
 
 
 class TelegramCollector(BaseCollector):
-    """Telegram collector implementation."""
+    """
+    Telegram collector implementation using Telethon passive listening.
 
-    def __init__(self, bot_token: str, chat_ids: List[str], keywords: List[str] = None):
+    Note: This collector is event-based (long-running), not polling-based.
+    The actual integration is done via services.telegram_collector.TelegramCollector
+    which is started by the daemon scheduler.
+
+    This class provides backward compatibility with the Collector interface
+    but actual message collection happens through the passive listener.
+    """
+
+    def __init__(self, bot_token: str = None, chat_ids: List[str] = None, keywords: List[str] = None):
+        # Note: bot_token is not used in new implementation (MTProto uses api_id/api_hash)
         self.bot_token = bot_token
-        self.chat_ids = chat_ids
+        self.chat_ids = chat_ids or []
         self.keywords = keywords or []
-        self.api_base = f"https://api.telegram.org/bot{bot_token}"
+        self._collector = None
+        self._session_manager = None
 
     async def collect(self, keywords: List[str], time_range: Dict[str, str]) -> List[CollectionMessage]:
-        """Collect messages from Telegram."""
-        messages = []
-
-        # In demo mode, generate mock data
-        # In production, integrate with Telegram API
-        for chat_id in self.chat_ids:
-            try:
-                # Mock collection for demo
-                mock_msg = CollectionMessage(
-                    message_id=f"msg_{chat_id}_{len(messages)}",
-                    source_channel="telegram",
-                    group_id=chat_id,
-                    author_id="user_001",
-                    raw_text=self._generate_mock_text(keywords),
-                    published_at="2026-05-23T10:00:00+08:00"
-                )
-                messages.append(mock_msg)
-            except Exception as e:
-                logger.error(f"Error collecting from {chat_id}: {e}")
-
-        return messages
+        """
+        This method is not used in the new implementation.
+        Actual collection is done via passive event listening in services.telegram_collector.
+        Returns empty list as messages come through the event handler.
+        """
+        # The new architecture uses events.NewMessage passive listening
+        # Messages are processed asynchronously and stored directly to DB
+        # This method exists only for interface compatibility
+        return []
 
     async def health_check(self) -> bool:
-        """Check Telegram API health."""
-        # In production, make a test API call
-        return True
+        """Check if the Telegram collector is running."""
+        if self._collector:
+            return await self._collector.health_check()
+        return False
 
-    def _generate_mock_text(self, keywords: List[str]) -> str:
-        """Generate mock message text."""
-        templates = [
-            "出抖号，千粉，换绑稳，加V:dyhao668",
-            "接码平台上线了新服务，联系Q:123456",
-            "专业刷粉，1000粉只需80元，微信:brushdan",
-            "大量抖音号出售，感兴趣的加微信号dy666888"
-        ]
-        return templates[hash(keywords[0] if keywords else "default") % len(templates)]
+    async def start(self, account_id: int = 1) -> bool:
+        """Start the passive listener."""
+        try:
+            from services.telegram_session_manager import TelegramSessionManager
+            from services.telegram_collector import TelegramCollector as NewTelegramCollector
+
+            self._session_manager = TelegramSessionManager()
+            self._collector = NewTelegramCollector(self._session_manager)
+            return await self._collector.start(account_id)
+        except Exception as e:
+            logger.error(f"Failed to start Telegram collector: {e}")
+            return False
+
+    async def stop(self) -> None:
+        """Stop the passive listener."""
+        if self._collector:
+            await self._collector.stop()
 
 
 class ForumCollector(BaseCollector):

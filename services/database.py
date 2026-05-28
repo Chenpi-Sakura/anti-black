@@ -43,6 +43,7 @@ class PostgreSQLService:
         self._init_schema()
         self._create_tables()
         self._create_indexes()
+        self.create_telegram_schema_tables()  # Create telegram schema tables
 
     def _connect(self) -> None:
         """Establish database connection."""
@@ -1546,6 +1547,111 @@ class PostgreSQLService:
             """).format(sql.Identifier(self.schema), sql.SQL(", ").join(sql.SQL(u) for u in updates)), values)
 
         return True
+
+    def create_telegram_schema_tables(self) -> None:
+        """Create telegram schema and tables if not exists."""
+        schema = 'telegram'
+
+        # Create schema
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                sql.Identifier(schema)))
+
+        # Table definitions for telegram schema
+        table_defs = [
+            # telegram_account table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.telegram_account (
+                id SERIAL PRIMARY KEY,
+                account_id INTEGER UNIQUE NOT NULL,
+                api_id INTEGER NOT NULL,
+                api_hash VARCHAR(64) NOT NULL,
+                phone VARCHAR(20) UNIQUE NOT NULL,
+                string_session TEXT,
+                is_enabled BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW(),
+                modified_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # telegram_channel table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.telegram_channel (
+                id SERIAL PRIMARY KEY,
+                channel_id BIGINT UNIQUE NOT NULL,
+                channel_title VARCHAR(256),
+                channel_username VARCHAR(128),
+                channel_url VARCHAR(256),
+                is_private BOOLEAN DEFAULT false,
+                is_mega_group BOOLEAN DEFAULT false,
+                is_enabled BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # telegram_keyword table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.telegram_keyword (
+                id SERIAL PRIMARY KEY,
+                keyword VARCHAR(256) NOT NULL,
+                regex_pattern VARCHAR(512) NOT NULL,
+                is_enabled BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # telegram_message table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.telegram_message (
+                id SERIAL PRIMARY KEY,
+                message_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL REFERENCES {schema}.telegram_channel(channel_id),
+                user_id BIGINT,
+                username VARCHAR(128),
+                text TEXT,
+                timestamp TIMESTAMP,
+                matched_keyword_id INTEGER REFERENCES {schema}.telegram_keyword(id),
+                raw_json JSONB DEFAULT '{{}}',
+                clue_id BIGINT,
+                processed BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(channel_id, message_id)
+            )
+            """,
+
+            # telegram_monitor table
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.telegram_monitor (
+                id SERIAL PRIMARY KEY,
+                account_id INTEGER NOT NULL REFERENCES {schema}.telegram_account(account_id),
+                channel_id BIGINT NOT NULL REFERENCES {schema}.telegram_channel(channel_id),
+                is_enabled BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(account_id, channel_id)
+            )
+            """
+        ]
+
+        # Create tables
+        with self._get_cursor() as cur:
+            for table_def in table_defs:
+                cur.execute(table_def)
+
+        # Create indexes for telegram schema
+        indexes = [
+            f"CREATE INDEX IF NOT EXISTS idx_telegram_message_processed ON {schema}.telegram_message(processed)",
+            f"CREATE INDEX IF NOT EXISTS idx_telegram_message_channel_id ON {schema}.telegram_message(channel_id)",
+            f"CREATE INDEX IF NOT EXISTS idx_telegram_message_created_at ON {schema}.telegram_message(created_at)",
+            f"CREATE INDEX IF NOT EXISTS idx_telegram_message_raw_json ON {schema}.telegram_message USING GIN (raw_json)",
+            f"CREATE INDEX IF NOT EXISTS idx_telegram_monitor_account ON {schema}.telegram_monitor(account_id)",
+            f"CREATE INDEX IF NOT EXISTS idx_telegram_monitor_channel ON {schema}.telegram_monitor(channel_id)",
+        ]
+
+        with self._get_cursor() as cur:
+            for idx_def in indexes:
+                cur.execute(idx_def)
+
+        logger.info(f"Created telegram schema and {len(table_defs)} tables with {len(indexes)} indexes")
 
     @classmethod
     def get_instance(cls) -> 'PostgreSQLService':

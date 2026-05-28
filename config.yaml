@@ -265,6 +265,17 @@ channels:
       category: "vertical"
       enabled: false
 
+# Telegram Configuration (MTProto passive listening)
+telegram:
+  enabled: true
+  account_id: 1
+  api_id: "${TELEGRAM_API_ID}"       # Get from https://my.telegram.org
+  api_hash: "${TELEGRAM_API_HASH}"   # Get from https://my.telegram.org
+  phone: "${TELEGRAM_PHONE}"        # Your Telegram phone number
+  # Keyword matching
+  keyword_refresh_interval: 900     # 15 minutes
+  pipeline_batch_size: 100          # Messages per pipeline batch
+
 # MediaCrawler Configuration
 media_crawler:
   enabled: true
@@ -332,6 +343,8 @@ daemon:
   error_book_check_hour: 2              # 2 AM daily
   # Model retraining schedule
   retrain_check_interval_hours: 12
+  # Telegram pipeline schedule (check for unprocessed messages)
+  telegram_pipeline_interval_seconds: 300  # 5 minutes
   # Log file
   log_file: "./logs/antiblack_daemon.log"
   # Browser automation (for platforms requiring login)
