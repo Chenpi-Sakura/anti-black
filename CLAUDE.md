@@ -76,8 +76,8 @@ Frontend connects via `EventSource` to receive real-time pipeline progress.
 
 | Model | Implementation | Purpose |
 |-------|---------------|---------|
-| EmbeddingModel | sentence-transformers (BAAI/bge-small-zh-v1.5) | Text vectorization |
-| ClassificationModel | xgboost (trained classifier) | Risk classification |
+| EmbeddingModel | Ollama (bge-m3 via HTTP API) | Text vectorization |
+| ClassificationModel | sklearn LogisticRegression | Risk classification |
 | FastTextModel | lid.176.bin | Language detection |
 | OCRModel | PaddleOCR | Image text extraction |
 | CloudVLMClient | DashScope qwen3.6-27b | Cloud vision model |

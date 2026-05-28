@@ -85,12 +85,23 @@ class ModelRetrainer:
             silver_samples = self._db.get_silver_samples()
             platinum_samples = self._db.get_platinum_samples()
 
-            if not silver_samples and not platinum_samples:
+            # FR-EVO-02: Get error book samples with lower weight
+            error_samples = []
+            try:
+                from services.error_book_sampler import ErrorBookSampler
+                error_sampler = ErrorBookSampler(self.config)
+                await error_sampler.initialize()
+                error_samples = await error_sampler.collect_error_samples()
+                logger.info(f"Collected {len(error_samples)} error book samples for retraining")
+            except Exception as e:
+                logger.warning(f"Failed to collect error book samples: {e}")
+
+            if not silver_samples and not platinum_samples and not error_samples:
                 logger.warning("No training samples available for retraining")
                 return
 
-            # Prepare training data
-            train_data = self._prepare_training_data(silver_samples, platinum_samples)
+            # Prepare training data with weighted samples
+            train_data = self._prepare_training_data(silver_samples, platinum_samples, error_samples)
 
             # Train classifier
             classifier = Classifier()
@@ -117,29 +128,49 @@ class ModelRetrainer:
                 'retrain_status': RetrainStatus.FAILED
             })
 
-    def _prepare_training_data(self, silver_samples: list, platinum_samples: list) -> Dict[str, Any]:
+    def _prepare_training_data(
+        self,
+        silver_samples: list,
+        platinum_samples: list,
+        error_samples: list
+    ) -> Dict[str, Any]:
         """
-        Prepare training data from silver and platinum samples.
+        Prepare training data with weighted sample handling.
+
+        Weight strategy:
+        - platinum (manually verified): 3.0
+        - silver (high-confidence auto-labeled): 1.0
+        - error_book (LLM-judged hard examples): 0.5
 
         Returns:
-            Dictionary with texts and labels for training
+            Dictionary with texts, labels, and weights for training
         """
         texts = []
         labels = []
+        weights = []
 
-        # Silver samples (high-confidence auto-labeled)
-        for sample in silver_samples:
-            texts.append(sample.get('cleaned_text', ''))
-            labels.append(sample.get('risk_label_level1', '未知'))
-
-        # Platinum samples (manually verified)
+        # Platinum samples (manually verified) - highest weight
         for sample in platinum_samples:
             texts.append(sample.get('cleaned_text', ''))
             labels.append(sample.get('correct_risk_label', sample.get('risk_label_level1', '未知')))
+            weights.append(3.0)
+
+        # Silver samples (high-confidence auto-labeled) - normal weight
+        for sample in silver_samples:
+            texts.append(sample.get('cleaned_text', ''))
+            labels.append(sample.get('risk_label_level1', '未知'))
+            weights.append(1.0)
+
+        # Error book samples (LLM-judged hard examples) - lower weight
+        for sample in error_samples:
+            texts.append(sample.get('text', ''))
+            labels.append(sample.get('label', '未知'))
+            weights.append(sample.get('sample_weight', 0.5))
 
         return {
             'texts': texts,
-            'labels': labels
+            'labels': labels,
+            'weights': weights
         }
 
 

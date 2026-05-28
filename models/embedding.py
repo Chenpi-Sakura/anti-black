@@ -1,11 +1,25 @@
 """
 Embedding model using sentence-transformers (bge-small-zh).
+
+DEPRECATED: Production now uses Ollama API (bge-m3) via pipeline/classifier.py.
+This module is kept only for local development/debugging without Ollama.
+
+Usage in production:
+    from pipeline.classifier import Classifier
+    classifier = Classifier()
+    # Embedding is handled by Ollama API inside classifier.retrain()
 """
 import os
 import logging
 from typing import List, Union, Optional
 
 logger = logging.getLogger(__name__)
+
+# Warn if used in production context
+_PRODUCTION_WARNING = """
+WARNING: EmbeddingModel uses local sentence-transformers which requires PyTorch.
+Production deployment should use Ollama API (bge-m3) via pipeline/classifier.py.
+"""
 
 
 class EmbeddingModel:

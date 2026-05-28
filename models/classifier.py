@@ -4,9 +4,101 @@ Classification model using XGBoost or sklearn linear classifier.
 import os
 import pickle
 import logging
+import threading
 from typing import Optional, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+class ClassifierModel:
+    """
+    Local classification model with atomic hot-swap support.
+    FR-EVO-03: Hot swap mechanism
+
+    Design: Lock-free inference, lock only for pointer swap.
+    """
+    _instance = None
+    _lock = threading.Lock()
+
+    def __init__(self):
+        self._model: 'LogisticRegression' = None
+        self._label_encoder: 'LabelEncoder' = None
+        self._version: str = None
+
+    @classmethod
+    def get_instance(cls) -> 'ClassifierModel':
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    def load(self, model_path: str):
+        """Load model from joblib checkpoint."""
+        import joblib
+        checkpoint = joblib.load(model_path)
+        self._model = checkpoint['model']
+        self._label_encoder = checkpoint['label_encoder']
+        self._version = checkpoint['version']
+
+    def hot_swap(self, new_model_path: str) -> bool:
+        """
+        Atomic hot swap: load new model then atomically switch pointers.
+        During swap, old model continues serving. After swap, new requests use new model.
+        """
+        import joblib
+        try:
+            new_checkpoint = joblib.load(new_model_path)
+
+            with self._lock:
+                self._model = new_checkpoint['model']
+                self._label_encoder = new_checkpoint['label_encoder']
+                self._version = new_checkpoint['version']
+
+            logger.info(f"Hot swap completed: version={self._version}")
+            return True
+        except Exception as e:
+            logger.error(f"Hot swap failed: {e}")
+            return False
+
+    async def predict(self, text: str) -> Tuple[str, float]:
+        """
+        Lock-free inference: get model reference first, then do Ollama call + sklearn inference outside lock.
+        Returns (label, confidence).
+        """
+        with self._lock:
+            if self._model is None or self._label_encoder is None:
+                return "未知", 0.0
+            current_model = self._model
+            current_encoder = self._label_encoder
+
+        try:
+            import httpx
+            import numpy as np
+
+            OLLAMA_API_URL = "http://localhost:11434/api/embed"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    OLLAMA_API_URL,
+                    json={"model": "bge-m3", "input": [text]}
+                )
+                response.raise_for_status()
+                embeddings = response.json().get('embeddings', [])
+                embedding = np.array(embeddings[0], dtype=np.float32)
+
+            pred_id = current_model.predict([embedding])[0]
+            probabilities = current_model.predict_proba([embedding])[0]
+            confidence = float(max(probabilities))
+            label = current_encoder.inverse_transform([pred_id])[0]
+
+            return label, confidence
+        except Exception as e:
+            logger.error(f"Classification inference failed: {e}")
+            return "未知", 0.0
+
+    @property
+    def version(self) -> Optional[str]:
+        return self._version
 
 
 class ClassificationModel:

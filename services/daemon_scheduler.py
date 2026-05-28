@@ -325,17 +325,38 @@ class DaemonScheduler:
             pg_db.upsert_slang_mapping(db_mapping)
             logger.info(f"Persisted slang: {candidate.word} -> {candidate.meaning}")
 
-            # Sync to LightRAG
+            # FR-SLANG-06: LightRAG structured insert
             try:
                 from services.lightrag_service import GraphProcessor
                 sync_gp = GraphProcessor(self.config)
                 await sync_gp.initialize()
-                rag_text = f"黑话映射: {candidate.word} -> {candidate.meaning} (来源: slang_learning, regex={candidate.regex_pattern})"
-                await sync_gp.lightrag.insert(rag_text)
+                rag_text = f"""黑话: {candidate.word}
+释义: {candidate.meaning}
+正则: {candidate.regex_pattern}
+来源: slang_learning
+渠道: {candidate.source_channel}"""
+                await sync_gp.lightrag.insert_custom_kg(rag_text, source='slang_learning')
                 await sync_gp.finalize()
                 logger.info(f"LightRAG sync: {candidate.word}")
             except Exception as e:
                 logger.warning(f"LightRAG sync failed for {candidate.word}: {e}")
+
+            # FR-COL-11: Promote to seed word using 7-day frequency (not historical total count)
+            try:
+                recent_count = pg_db.get_slang_recent_occurrences(
+                    word=candidate.word,
+                    channel=candidate.source_channel,
+                    days=7
+                )
+                if recent_count >= 100:
+                    pg_db.promote_seed_word(
+                        word=candidate.word,
+                        operator="slang_learning",
+                        reason=f"CONFIRMED slang, {recent_count} occurrences in past 7 days"
+                    )
+                    logger.info(f"Promoted slang to seed word: {candidate.word} (recent_count={recent_count})")
+            except Exception as e:
+                logger.warning(f"Seed word promotion failed for {candidate.word}: {e}")
 
     async def _error_book_loop(self):
         """Sample and judge high-confidence clues daily at 2 AM."""

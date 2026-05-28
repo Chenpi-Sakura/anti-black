@@ -1060,6 +1060,46 @@ class PostgreSQLService:
                         (SeedWordStatus.ACTIVE.value, datetime.utcnow(), word))
             return cur.rowcount > 0
 
+    def insert_training_sample(self, sample: Dict[str, Any]) -> str:
+        """Write a silver/platinum training sample to training_samples table."""
+        from utils import generate_id
+        sample_id = generate_id("train")
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO {}.training_samples
+                (sample_id, text, label, label_source, confidence, collection_context, created_at)
+                VALUES (%(sample_id)s, %(text)s, %(label)s, %(label_source)s,
+                        %(confidence)s, %(collection_context)s, NOW())
+            """).format(sql.Identifier(self.schema)), {
+                'sample_id': sample_id,
+                'text': sample['text'],
+                'label': sample['label'],
+                'label_source': sample.get('label_source', 'silver'),
+                'confidence': sample.get('confidence', 1.0),
+                'collection_context': sample.get('collection_context', ''),
+            })
+        return sample_id
+
+    def get_slang_recent_occurrences(self, word: str, channel: str, days: int = 7) -> int:
+        """
+        Query the number of occurrences of a slang word in a specific channel within recent N days.
+        FR-COL-11: Must use time-window frequency, not historical total count.
+        """
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT COUNT(*) as cnt
+                FROM {}.slang_candidates
+                WHERE candidate_word = %(word)s
+                  AND source_channel = %(channel)s
+                  AND updated_at >= NOW() - INTERVAL '1 day' * %(days)s
+            """).format(sql.Identifier(self.schema)), {
+                'word': word,
+                'channel': channel,
+                'days': days
+            })
+            return cur.fetchone()['cnt']
+
     # ========== Proposal Operations ==========
 
     def insert_proposal(self, proposal: Proposal) -> str:

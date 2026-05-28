@@ -70,6 +70,44 @@ class ErrorBookSampler:
 
         return judged_count
 
+    async def collect_error_samples(self, limit: int = 1000) -> List[Dict]:
+        """
+        FR-EVO-02: Collect error book samples for retraining with weighted sample handling.
+        Returns samples with sample_weight = 0.5 (Hard Examples).
+        """
+        if not self._db:
+            await self.initialize()
+
+        with self._db._get_cursor() as cur:
+            cur.execute("""
+                SELECT e.clue_id, e.original_label, e.llm_label, c.cleaned_text
+                FROM antiblack.error_book e
+                JOIN antiblack.clues c ON e.clue_id = c.clue_id
+                WHERE e.used_for_training = FALSE
+                ORDER BY e.created_at DESC
+                LIMIT %(limit)s
+            """, {'limit': limit})
+
+            samples = []
+            for row in cur.fetchall():
+                samples.append({
+                    'text': row['cleaned_text'],
+                    'label': row['llm_label'],
+                    'sample_weight': 0.5,
+                    'label_source': 'error_book'
+                })
+
+            if samples:
+                clue_ids = [s['clue_id'] for s in samples]
+                cur.execute("""
+                    UPDATE antiblack.error_book
+                    SET used_for_training = TRUE
+                    WHERE clue_id = ANY(%(clue_ids)s)
+                """, {'clue_ids': clue_ids})
+
+        logger.info(f"Collected {len(samples)} error book samples for training")
+        return samples
+
     async def _llm_judge(self, clue: Dict[str, Any]) -> Dict[str, Any]:
         """
         Call LLM to classify a single clue.
