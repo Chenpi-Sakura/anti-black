@@ -2,6 +2,12 @@
 
 黑灰产情报分析Agent系统 - 后端服务
 
+## 注意事项
+
+本项目包含 [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) 子目录，
+其代码遵循 [NON-COMMERCIAL LEARNING LICENSE](MediaCrawler/LICENSE)。
+请在使用时遵守其许可证条款。
+
 ## 项目状态
 
 **全平台数据采集已成功运行！**
