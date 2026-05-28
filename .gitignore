@@ -45,7 +45,6 @@ LightRAG/
 RAG-anything/
 .claude/
 rag_storage/
-MediaCrawler/
 
 # Frontend
 node_modules/

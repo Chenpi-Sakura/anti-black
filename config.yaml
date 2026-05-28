@@ -274,7 +274,7 @@ media_crawler:
     port: 5432
     user: "antiblack"
     password: "antiblack123"
-    database: "antiblack"
+    database: "media_crawler"
   # Polling interval in seconds
   poll_interval: 60
   # Platforms to crawl
@@ -294,8 +294,59 @@ media_crawler:
         - "加微"
         - "刷粉"
       enabled: true
+    - name: "xhs"
+      keywords:
+        - "出抖号"
+        - "抖音号买卖"
+        - "加V"
+        - "千粉"
+        - "微信号"
+      enabled: true
+    - name: "ks"
+      keywords:
+        - "出抖号"
+        - "抖音号买卖"
+        - "加V"
+        - "千粉"
+        - "微信号"
+      enabled: true
+    - name: "weibo"
+      keywords:
+        - "出抖号"
+        - "抖音号买卖"
+        - "加V"
+        - "千粉"
+        - "微信号"
+      enabled: true
   #采集评论
   enable_comments: true
+
+# Daemon Configuration (24/7 Background Patrol)
+daemon:
+  enabled: true
+  # Collection schedule
+  collection_interval_seconds: 900      # 15 minutes
+  # Slang evolution schedule
+  slang_evolution_interval_seconds: 3600  # 1 hour
+  # LLM error book sampling schedule
+  error_book_check_hour: 2              # 2 AM daily
+  # Model retraining schedule
+  retrain_check_interval_hours: 12
+  # Log file
+  log_file: "./logs/antiblack_daemon.log"
+  # Browser automation (for platforms requiring login)
+  browser_automation:
+    enabled: false
+    chrome_ws_url: "ws://127.0.0.1:9222/devtools/browser"
+    click_on_start: true
+    page_url: "http://127.0.0.1:8000/crawler"
+  # Platform list for collection
+  platforms:
+    - douyin
+    - tieba
+    - xhs
+    - ks
+    - weibo
 
 # Monitoring Configuration
 monitoring:

@@ -79,6 +79,60 @@ class SlangLearner:
             r'^[\w]+$',  # Alphanumeric only
         ]
 
+        # Load candidates from DB if available
+        self._load_candidates_from_db()
+
+    def _load_candidates_from_db(self):
+        """Load slang candidates from database to restore state after restart."""
+        from services.database import PostgreSQLService
+        from models.entities import SlangStatus
+
+        try:
+            db = PostgreSQLService.get_instance()
+            db_candidates = db.get_slang_candidates_by_status(SlangStatus.NEW)
+            db_candidates.extend(db.get_slang_candidates_by_status(SlangStatus.OBSERVED))
+            db_candidates.extend(db.get_slang_candidates_by_status(SlangStatus.LIKELY))
+
+            for db_c in db_candidates:
+                word = db_c.get('candidate_word', '')
+                if word and word not in self._candidates:
+                    self._candidates[word] = SlangCandidate(
+                        word=word,
+                        contexts=[],  # Contexts not restored, just state
+                        occurrence_count=db_c.get('occurrence_count', 0),
+                        status=db_c.get('status', 'NEW'),
+                        inference_count=db_c.get('inference_count', 0),
+                        regex_pattern=db_c.get('regex_pattern'),
+                        meaning=db_c.get('meaning'),
+                        source_channel=db_c.get('source_channel')
+                    )
+
+            if self._candidates:
+                logger.info(f"Loaded {len(self._candidates)} slang candidates from database")
+        except Exception as e:
+            logger.warning(f"Failed to load candidates from DB: {e}")
+
+    def _persist_candidate(self, candidate: SlangCandidate):
+        """Persist candidate to database."""
+        from services.database import PostgreSQLService
+        from models.entities import SlangCandidate as DBSlangCandidate
+
+        try:
+            db = PostgreSQLService.get_instance()
+            db_candidate = DBSlangCandidate(
+                candidate_word=candidate.word,
+                contexts=[text for _, text in candidate.contexts],
+                occurrence_count=candidate.occurrence_count,
+                status=candidate.status,
+                inference_count=candidate.inference_count,
+                regex_pattern=candidate.regex_pattern,
+                meaning=candidate.meaning,
+                source_channel=candidate.source_channel
+            )
+            db.upsert_slang_candidate(db_candidate)
+        except Exception as e:
+            logger.warning(f"Failed to persist candidate {candidate.word}: {e}")
+
     def process_text(self, text: str, source_channel: str = None, message_id: str = None) -> List[SlangCandidate]:
         """
         Process text to find new slang candidates.
@@ -118,6 +172,8 @@ class SlangLearner:
                     pass
                 elif trigger_msg_id:
                     candidate.validation_trigger_msg_id = trigger_msg_id
+                # Persist candidate state to DB
+                self._persist_candidate(candidate)
                 discovered.append(candidate)
                 logger.info(f"Slang candidate {word} transitioned: {old_status} -> {candidate.status}")
 

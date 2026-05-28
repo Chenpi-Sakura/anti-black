@@ -2,6 +2,20 @@
 
 黑灰产情报分析Agent系统 - 后端服务
 
+## 项目状态
+
+**全平台数据采集已成功运行！**
+
+| 平台 | 数据量 |
+|------|--------|
+| dy（抖音） | 143 aweme, 1611 comment |
+| tieba（贴吧） | 102 note, 905 comment |
+| ks（快手） | 32 video |
+| wb（微博） | 237 note, 1170 comment |
+| xhs（小红书） | 197 note, 1586 comment |
+
+**总计：751 条内容 + 5272 条评论**
+
 ## 项目结构
 
 ```
@@ -18,18 +32,21 @@ antiblack/
 │   ├── extractor.py       # 实体抽取模块
 │   ├── router.py          # 分流决策模块
 │   └── slang_learning.py  # 黑话学习模块（LLM验证）
-├── scripts/                # 脚本
-│   ├── run_pipeline.py   # 完整流水线脚本
-│   └── check_*.py        # 调试脚本
+├── scripts/               # 脚本
+│   ├── run_pipeline.py    # 完整流水线脚本
+│   ├── multi_crawler_scheduler.py  # 多平台采集调度器
+│   ├── run_daemon.py      # 守护进程入口
+│   └── start_media_crawler_api.py  # MediaCrawler API服务
 ├── services/              # 服务层
 │   ├── database.py       # PostgreSQL服务
-│   └── lightrag_service.py  # LightRAG服务
-├── tests/                # 单元测试
-├── archive/              # 历史脚本存档
-├── MediaCrawler/         # 数据采集模块（外部克隆）
-├── LightRAG/             # 知识图谱库（外部克隆）
+│   ├── daemon_scheduler.py   # 守护进程调度器
+│   ├── error_book_sampler.py # LLM错题本抽检
+│   ├── model_retrainer.py    # 模型重训触发
+│   └── browser_automator.py  # 浏览器自动化
+├── MediaCrawler/          # 数据采集模块（已定制）
+├── LightRAG/             # 知识图谱库
 ├── docs/                 # 设计文档
-├── config.yaml          # 配置文件
+├── config.yaml           # 配置文件
 ├── main.py              # 主入口
 └── requirements.txt     # 依赖列表
 ```
@@ -56,7 +73,45 @@ pip install -r requirements.txt
 conda run -n anti-black python scripts/run_pipeline.py
 ```
 
-### 4. 运行API服务
+### 4. 多平台数据采集
+
+**前提：** 用户需手动启动 Chrome 远程调试：
+```bash
+chrome --remote-debugging-port=1936
+```
+
+**启动采集：**
+```bash
+# 启动 MediaCrawler API 服务
+conda run -n anti-black python scripts/start_media_crawler_api.py
+
+# 在另一个终端启动全平台采集（单次）
+conda run -n anti-black python scripts/multi_crawler_scheduler.py --single -p dy,tieba,ks,wb,xhs
+
+# 或持续运行模式（每15分钟采集一次）
+conda run -n anti-black python scripts/multi_crawler_scheduler.py --daemon -p dy,tieba,ks,wb,xhs --interval 900
+```
+
+**采集结果查看：**
+```bash
+# 直接查询数据库
+conda run -n anti-black python -c "
+import psycopg2, os
+from dotenv import load_dotenv
+load_dotenv()
+conn = psycopg2.connect(host=os.getenv('POSTGRES_HOST'), port=5432, dbname='media_crawler', user='antiblack', password='antiblack123')
+cur = conn.cursor()
+cur.execute('SELECT COUNT(*) FROM public.douyin_aweme')
+print(f'dy: {cur.fetchone()[0]}')
+cur.execute('SELECT COUNT(*) FROM public.tieba_note')
+print(f'tieba: {cur.fetchone()[0]}')
+cur.execute('SELECT COUNT(*) FROM public.xhs_note')
+print(f'xhs: {cur.fetchone()[0]}')
+conn.close()
+"
+```
+
+### 5. 运行API服务
 
 ```bash
 python main.py
@@ -64,7 +119,7 @@ python main.py
 
 API服务将在 http://127.0.0.1:8000 启动。
 
-### 5. 测试
+### 6. 测试
 
 ```bash
 pytest tests/ -v

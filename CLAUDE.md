@@ -130,3 +130,37 @@ All data entities are dataclasses defined in `models/entities.py`:
 - Always confirm before git push operations
 - Use `docker compose` not `docker-compose`
 - Conda environment: run commands with `conda run -n <env_name> <command>` syntax
+
+## CDP Mode (Chrome DevTools Protocol)
+
+The crawler uses CDP mode for anti-detection when connecting to an existing Chrome browser.
+
+**启动方式（用户手动）：**
+1. 手动启动 Chrome：`chrome --remote-debugging-port=1936`
+2. 或在 Chrome 地址栏输入：`chrome://inspect/#remote-debugging`
+
+**CDP 连接流程：**
+- MediaCrawler 通过 WebSocket 连接到 `localhost:1936`
+- CDP_CONNECT_EXISTING=True 时使用 `/devtools/browser` 端点
+- 用户需要在浏览器弹出的确认对话框中点击"允许"
+
+**已知问题：**
+- **DouYin CDP fallback bug**：当 CDP 连接失败时，原代码会 fallback 到 Playwright 模式，但 Playwright chromium 未安装会导致误导性错误。已修复：`launch_browser_with_cdp()` 失败时直接抛异常，不再 fallback。
+- **快手数据少**：Kuaishou 平台对黑灰产关键词返回数据量少，非代码问题
+- **XHS Cookie 会过期**：需要定期更新登录 Cookie
+
+## 调试经验总结
+
+### MediaCrawler 数据库配置
+- MediaCrawler 写入 `media_crawler` 数据库（public schema）
+- AntiBlack 的 `MediaCrawlerAdapter` 需要在 `config.yaml` 中配置 `database: media_crawler`（不是 `antiblack`）
+- 表在 `media_crawler.public` 而非 `antiblack.media_crawler`
+
+### 成功采集的平台
+| 平台 | 数据量 | 说明 |
+|------|--------|------|
+| dy | 143 aweme, 1611 comment | CDP模式成功 |
+| tieba | 102 note, 905 comment | CDP模式成功 |
+| ks | 32 video | 数据量少 |
+| wb | 237 note, 1170 comment | 成功 |
+| xhs | 197 note, 1586 comment | CDP模式成功，需定期更新Cookie |

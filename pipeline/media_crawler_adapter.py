@@ -109,6 +109,12 @@ class MediaCrawlerAdapter:
             return await self._poll_douyin()
         elif platform == 'tieba':
             return await self._poll_tieba()
+        elif platform == 'xhs':
+            return await self._poll_xhs()
+        elif platform == 'ks':
+            return await self._poll_kuaishou()
+        elif platform == 'weibo':
+            return await self._poll_weibo()
         else:
             logger.warning(f"Unsupported platform: {platform}")
             return []
@@ -250,6 +256,210 @@ class MediaCrawlerAdapter:
                 "reply_num": row.get('total_replay_num', '0'),
                 "ip_location": row.get('ip_location', ''),
                 "source_keyword": row.get('source_keyword', ''),
+            }
+        }
+
+    async def _poll_xhs(self) -> List[Dict[str, Any]]:
+        """Poll new Xiaohongshu content, filtered by keywords from SlangMapping."""
+        async with self._db_pool.acquire() as conn:
+            keyword_filter_title = self._build_keyword_filter('title')
+            keyword_filter_desc = self._build_keyword_filter('desc')
+            combined_filter = f"({keyword_filter_title} OR {keyword_filter_desc})"
+
+            query = f"""
+                SELECT
+                    note_id,
+                    title,
+                    "desc",
+                    nickname,
+                    user_id,
+                    avatar,
+                    ip_location,
+                    liked_count,
+                    collected_count,
+                    comment_count,
+                    share_count,
+                    time,
+                    note_url,
+                    source_keyword,
+                    add_ts,
+                    last_modify_ts
+                FROM media_crawler.xhs_note
+                WHERE add_ts > $1 AND ({combined_filter})
+                ORDER BY add_ts ASC
+                LIMIT 100
+            """
+
+            last_ts = self._last_check_time.get('xhs', self.MIN_DATETIME).timestamp()
+            rows = await conn.fetch(query, last_ts)
+
+            if rows:
+                self._last_check_time['xhs'] = datetime.now()
+                logger.info(f"Polled {len(rows)} new Xiaohongshu notes (keyword filter: {len(self._keywords)} keywords)")
+
+            return [self._convert_xhs_note(row) for row in rows]
+
+    def _convert_xhs_note(self, row) -> Dict[str, Any]:
+        """Convert Xiaohongshu note to RawMessage format."""
+        time_val = row.get('time', 0)
+        if isinstance(time_val, int):
+            published_at = datetime.fromtimestamp(time_val).isoformat()
+        else:
+            published_at = str(time_val)
+
+        return {
+            "message_id": f"xhs_{row.get('note_id')}",
+            "source_channel": "xiaohongshu",
+            "group_id": row.get('source_keyword', ''),
+            "author_id": str(row.get('user_id', '')),
+            "raw_text": f"{row.get('title', '')} {row.get('desc', '')}".strip(),
+            "published_at": published_at,
+            "metadata": {
+                "platform": "xiaohongshu",
+                "content_type": "note",
+                "note_id": str(row.get('note_id', '')),
+                "title": row.get('title', ''),
+                "author": row.get('nickname', ''),
+                "liked_count": row.get('liked_count', '0'),
+                "collected_count": row.get('collected_count', '0'),
+                "comment_count": row.get('comment_count', '0'),
+                "share_count": row.get('share_count', '0'),
+                "ip_location": row.get('ip_location', ''),
+                "source_keyword": row.get('source_keyword', ''),
+                "note_url": row.get('note_url', ''),
+            }
+        }
+
+    async def _poll_kuaishou(self) -> List[Dict[str, Any]]:
+        """Poll new Kuaishou content, filtered by keywords from SlangMapping."""
+        async with self._db_pool.acquire() as conn:
+            keyword_filter_title = self._build_keyword_filter('title')
+            keyword_filter_desc = self._build_keyword_filter('desc')
+            combined_filter = f"({keyword_filter_title} OR {keyword_filter_desc})"
+
+            query = f"""
+                SELECT
+                    video_id,
+                    user_id,
+                    nickname,
+                    avatar,
+                    title,
+                    "desc",
+                    liked_count,
+                    viewd_count,
+                    video_url,
+                    video_cover_url,
+                    create_time,
+                    source_keyword,
+                    add_ts,
+                    last_modify_ts
+                FROM media_crawler.kuaishou_video
+                WHERE add_ts > $1 AND ({combined_filter})
+                ORDER BY add_ts ASC
+                LIMIT 100
+            """
+
+            last_ts = self._last_check_time.get('ks', self.MIN_DATETIME).timestamp()
+            rows = await conn.fetch(query, last_ts)
+
+            if rows:
+                self._last_check_time['ks'] = datetime.now()
+                logger.info(f"Polled {len(rows)} new Kuaishou videos (keyword filter: {len(self._keywords)} keywords)")
+
+            return [self._convert_kuaishou_video(row) for row in rows]
+
+    def _convert_kuaishou_video(self, row) -> Dict[str, Any]:
+        """Convert Kuaishou video to RawMessage format."""
+        create_time = row.get('create_time', 0)
+        if isinstance(create_time, int):
+            published_at = datetime.fromtimestamp(create_time).isoformat()
+        else:
+            published_at = str(create_time)
+
+        return {
+            "message_id": f"ks_{row.get('video_id')}",
+            "source_channel": "kuaishou",
+            "group_id": row.get('source_keyword', ''),
+            "author_id": str(row.get('user_id', '')),
+            "raw_text": f"{row.get('title', '')} {row.get('desc', '')}".strip(),
+            "published_at": published_at,
+            "metadata": {
+                "platform": "kuaishou",
+                "content_type": "video",
+                "video_id": str(row.get('video_id', '')),
+                "title": row.get('title', ''),
+                "author": row.get('nickname', ''),
+                "liked_count": row.get('liked_count', '0'),
+                "view_count": row.get('viewd_count', '0'),
+                "video_url": row.get('video_url', ''),
+                "ip_location": row.get('ip_location', ''),
+                "source_keyword": row.get('source_keyword', ''),
+            }
+        }
+
+    async def _poll_weibo(self) -> List[Dict[str, Any]]:
+        """Poll new Weibo content, filtered by keywords from SlangMapping."""
+        async with self._db_pool.acquire() as conn:
+            keyword_filter = self._build_keyword_filter('content')
+
+            query = f"""
+                SELECT
+                    note_id,
+                    user_id,
+                    nickname,
+                    avatar,
+                    content,
+                    liked_count,
+                    comments_count,
+                    shared_count,
+                    create_time,
+                    create_date_time,
+                    note_url,
+                    ip_location,
+                    source_keyword,
+                    add_ts,
+                    last_modify_ts
+                FROM media_crawler.weibo_note
+                WHERE add_ts > $1 AND ({keyword_filter})
+                ORDER BY add_ts ASC
+                LIMIT 100
+            """
+
+            last_ts = self._last_check_time.get('weibo', self.MIN_DATETIME).timestamp()
+            rows = await conn.fetch(query, last_ts)
+
+            if rows:
+                self._last_check_time['weibo'] = datetime.now()
+                logger.info(f"Polled {len(rows)} new Weibo notes (keyword filter: {len(self._keywords)} keywords)")
+
+            return [self._convert_weibo_note(row) for row in rows]
+
+    def _convert_weibo_note(self, row) -> Dict[str, Any]:
+        """Convert Weibo note to RawMessage format."""
+        create_time = row.get('create_time', 0)
+        if isinstance(create_time, int):
+            published_at = datetime.fromtimestamp(create_time).isoformat()
+        else:
+            published_at = str(create_time)
+
+        return {
+            "message_id": f"weibo_{row.get('note_id')}",
+            "source_channel": "weibo",
+            "group_id": row.get('source_keyword', ''),
+            "author_id": str(row.get('user_id', '')),
+            "raw_text": row.get('content', ''),
+            "published_at": published_at,
+            "metadata": {
+                "platform": "weibo",
+                "content_type": "note",
+                "note_id": str(row.get('note_id', '')),
+                "author": row.get('nickname', ''),
+                "liked_count": row.get('liked_count', '0'),
+                "comment_count": row.get('comments_count', '0'),
+                "share_count": row.get('shared_count', '0'),
+                "ip_location": row.get('ip_location', ''),
+                "source_keyword": row.get('source_keyword', ''),
+                "note_url": row.get('note_url', ''),
             }
         }
 
