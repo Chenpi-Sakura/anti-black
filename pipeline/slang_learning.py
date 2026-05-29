@@ -85,7 +85,7 @@ class SlangLearner:
     def _load_candidates_from_db(self):
         """Load slang candidates from database to restore state after restart."""
         from services.database import PostgreSQLService
-        from models.entities import SlangStatus
+        from models import SlangStatus
 
         try:
             db = PostgreSQLService.get_instance()
@@ -115,7 +115,7 @@ class SlangLearner:
     def _persist_candidate(self, candidate: SlangCandidate):
         """Persist candidate to database."""
         from services.database import PostgreSQLService
-        from models.entities import SlangCandidate as DBSlangCandidate
+        from models import SlangCandidate as DBSlangCandidate
 
         try:
             db = PostgreSQLService.get_instance()

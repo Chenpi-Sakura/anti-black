@@ -127,7 +127,7 @@ class DaemonScheduler:
         from pipeline.extractor import Extractor
         from pipeline.router import Router
         from services.database import PostgreSQLService
-        from models.entities import Clue
+        from models import Clue
         from utils import generate_id
 
         cleaner = Cleaner()
@@ -209,7 +209,7 @@ class DaemonScheduler:
             self._slang_learner.process_text(msg.cleaned_text, source_channel=msg.source_channel)
 
         # Update metrics
-        from models.entities import Metrics
+        from models import Metrics
         from psycopg2 import sql
 
         today = datetime.now().date().isoformat()
@@ -291,7 +291,7 @@ class DaemonScheduler:
     async def _persist_confirmed_slang(self, candidates):
         """Persist confirmed slang to database."""
         from services.database import PostgreSQLService
-        from models.entities import SlangCandidate as DBSlangCandidate, SlangMapping as DBSlangMapping
+        from models import SlangCandidate as DBSlangCandidate, SlangMapping as DBSlangMapping
         from utils import generate_id
 
         pg_db = PostgreSQLService.get_instance()

@@ -45,7 +45,7 @@ async def create_query(
     query_id = generate_id("qry")
 
     # Create query task
-    from models.entities import QueryTask, QueryStatus
+    from models import QueryTask, QueryStatus
     task = QueryTask(
         query_id=query_id,
         query_text=data.query_text,

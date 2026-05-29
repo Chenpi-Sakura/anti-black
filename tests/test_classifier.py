@@ -3,8 +3,7 @@
 import sys
 sys.path.insert(0, '.')
 
-from models.classifier import ClassificationModel
-from models.embedding import EmbeddingModel
+from models import ClassificationModel, EmbeddingModel
 
 # Initialize
 embed_model = EmbeddingModel()
@@ -12,8 +11,8 @@ embed_model.load()
 
 clf_model = ClassificationModel(
     model_type="xgboost",
-    model_path="./models/xgboost_classifier.pkl",
-    label_encoder_path="./models/xgboost_classifier_label_encoder.pkl"
+    model_path="./models/ml/assets/xgboost_classifier.pkl",
+    label_encoder_path="./models/ml/assets/xgboost_classifier_label_encoder.pkl"
 )
 clf_model.load()
 

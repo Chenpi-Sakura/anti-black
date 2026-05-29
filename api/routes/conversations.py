@@ -32,7 +32,7 @@ async def create_conversation(
     """Create a new conversation."""
     conversation_id = generate_id("conv")
 
-    from models.entities import Conversation
+    from models import Conversation
     conversation = Conversation(
         conversation_id=conversation_id,
         title=data.title,

@@ -4,7 +4,7 @@ Feedback API routes
 from fastapi import APIRouter, Depends, HTTPException
 from api.schemas.feedback import FeedbackCreate
 from api.deps import get_db
-from models.entities import Feedback
+from models import Feedback
 from utils import generate_id, format_success_response
 
 router = APIRouter(prefix="/feedback", tags=["反馈"])

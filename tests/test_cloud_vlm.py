@@ -3,7 +3,7 @@
 import sys
 sys.path.insert(0, '.')
 
-from models.cloud_vlm_client import CloudVLMClient
+from models import CloudVLMClient
 
 # Create client
 client = CloudVLMClient(

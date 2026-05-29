@@ -3,7 +3,7 @@ Export API routes
 """
 from fastapi import APIRouter, Depends, HTTPException
 from api.deps import get_db
-from models.entities import ExportTask
+from models import ExportTask
 from utils import generate_id, format_success_response
 
 router = APIRouter(prefix="/exports", tags=["导出"])

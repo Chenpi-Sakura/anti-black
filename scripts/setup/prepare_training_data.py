@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 
 def load_training_data(data_path: str) -> List[Dict[str, Any]]:
@@ -25,7 +25,7 @@ def load_training_data(data_path: str) -> List[Dict[str, Any]]:
 
 def generate_embeddings(texts: List[str], model_name: str = "BAAI/bge-small-zh-v1.5") -> List[List[float]]:
     """Generate embeddings for texts using sentence-transformers."""
-    from models.embedding import EmbeddingModel
+    from models import EmbeddingModel
 
     logger.info(f"Loading embedding model: {model_name}")
     embed_model = EmbeddingModel(model_name=model_name)
@@ -65,8 +65,8 @@ def prepare_training_data(
 def train_xgboost_classifier(
     X: List[List[float]],
     y: List[str],
-    model_path: str = "./models/xgboost_classifier.pkl",
-    label_encoder_path: str = "./models/label_encoder.pkl"
+    model_path: str = "./models/ml/assets/xgboost_classifier.pkl",
+    label_encoder_path: str = "./models/ml/assets/xgboost_classifier_label_encoder.pkl"
 ) -> None:
     """
     Train XGBoost classifier and save model.
@@ -208,8 +208,11 @@ if __name__ == "__main__":
         X, y = prepare_training_data(data)
 
         # Train and save model
-        model_path = args.model or "./models/xgboost_classifier.pkl"
+        model_path = args.model or "./models/ml/assets/xgboost_classifier.pkl"
         label_encoder_path = model_path.replace(".pkl", "_label_encoder.pkl")
+        if "_label_encoder" not in label_encoder_path:
+            # If the user specified a custom name without .pkl extension matching
+            label_encoder_path = model_path.replace(".pkl", "") + "_label_encoder.pkl"
         train_xgboost_classifier(X, y, model_path, label_encoder_path)
     else:
         parser.print_help()

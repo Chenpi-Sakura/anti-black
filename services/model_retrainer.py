@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from config import get_config
 from services.database import PostgreSQLService
-from models.entities import RetrainStatus
+from models import RetrainStatus
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class ModelRetrainer:
 
             # Import retrain components
             from pipeline.classifier import Classifier
-            from models.entities import Feedback
+            from models import Feedback
 
             # Get training data
             silver_samples = self._db.get_silver_samples()

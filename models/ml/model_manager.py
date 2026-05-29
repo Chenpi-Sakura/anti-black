@@ -46,7 +46,7 @@ class ModelManager:
         # Initialize Cloud VLM client (优先使用云端VLM)
         cloud_vlm_cfg = config.get('cloud_vlm', {})
         if cloud_vlm_cfg.get('enabled', False):
-            from .cloud_vlm_client import CloudVLMClient
+            from models.clients.cloud_vlm import CloudVLMClient
             self._cloud_vlm_client = CloudVLMClient(
                 api_base=cloud_vlm_cfg.get('api_base', 'https://dashscope.aliyuncs.com/compatible-mode/v1'),
                 api_key=cloud_vlm_cfg.get('api_key'),
@@ -58,7 +58,7 @@ class ModelManager:
         # Initialize Ollama client (VLM和Embedding备选)
         ollama_cfg = config.get('ollama', {})
         if ollama_cfg.get('enabled', False):
-            from .ollama_client import OllamaClient
+            from models.clients.ollama import OllamaClient
             self._ollama_client = OllamaClient(
                 base_url=ollama_cfg.get('base_url', 'http://localhost:11434'),
                 vlm_model=ollama_cfg.get('vlm_model', 'qwen2-vl:2b'),
@@ -71,7 +71,7 @@ class ModelManager:
     def embedding(self):
         """Get or create embedding model."""
         if self._embedding_model is None:
-            from .embedding import EmbeddingModel
+            from models.ml.embedding import EmbeddingModel
 
             config = self._config.get('local_models', {}).get('embedding', {}) if self._config else {}
             self._embedding_model = EmbeddingModel(
@@ -86,7 +86,7 @@ class ModelManager:
     def classifier(self):
         """Get or create classification model."""
         if self._classification_model is None:
-            from .classifier import ClassificationModel
+            from models.ml.classifier import ClassificationModel
 
             config = self._config.get('local_models', {}).get('classifier', {}) if self._config else {}
             self._classification_model = ClassificationModel(
@@ -101,7 +101,7 @@ class ModelManager:
     def fasttext(self):
         """Get or create FastText model."""
         if self._fasttext_model is None:
-            from .fasttext import FastTextModel
+            from models.ml.fasttext import FastTextModel
 
             config = self._config.get('local_models', {}).get('fasttext', {}) if self._config else {}
             self._fasttext_model = FastTextModel(
@@ -115,7 +115,7 @@ class ModelManager:
     def ocr(self):
         """Get or create OCR model."""
         if self._ocr_model is None:
-            from .ocr import OCRModel
+            from models.ml.ocr import OCRModel
 
             config = self._config.get('local_models', {}).get('ocr', {}) if self._config else {}
             self._ocr_model = OCRModel(
@@ -130,7 +130,7 @@ class ModelManager:
     def ollama(self):
         """Get or create Ollama client."""
         if self._ollama_client is None:
-            from .ollama_client import OllamaClient
+            from models.clients.ollama import OllamaClient
             self._ollama_client = OllamaClient()
             logger.info("Ollama client created (lazy loading)")
         return self._ollama_client
@@ -139,7 +139,7 @@ class ModelManager:
     def cloud_vlm(self):
         """Get or create Cloud VLM client."""
         if self._cloud_vlm_client is None:
-            from .cloud_vlm_client import CloudVLMClient
+            from models.clients.cloud_vlm import CloudVLMClient
             self._cloud_vlm_client = CloudVLMClient()
             logger.info("Cloud VLM client created (lazy loading)")
         return self._cloud_vlm_client

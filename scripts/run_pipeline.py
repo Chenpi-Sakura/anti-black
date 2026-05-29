@@ -140,7 +140,7 @@ async def main():
 
     # Step 6.5: Insert clues into database
     logger.info("\n[Step 6.5] Inserting clues into database...")
-    from models.entities import Clue, SlangStatus
+    from models import Clue, SlangStatus
     from utils import generate_id
     from datetime import datetime
     clues_inserted = 0
@@ -199,7 +199,7 @@ async def main():
 
     # Step 6.6: Update metrics
     logger.info("\n[Step 6.6] Updating metrics...")
-    from models.entities import Metrics
+    from models import Metrics
     from datetime import date
     today = date.today().isoformat()
 
@@ -269,7 +269,7 @@ async def main():
     if confirmed:
         logger.info(f"LLM validated {len(confirmed)} new CONFIRMED slang")
         # 持久化 confirmed slang 到 DB
-        from models.entities import SlangCandidate as DBSlangCandidate, SlangMapping as DBSlangMapping, SlangStatus
+        from models import SlangCandidate as DBSlangCandidate, SlangMapping as DBSlangMapping, SlangStatus
         from utils import generate_id
         for candidate in confirmed:
             db_candidate = DBSlangCandidate(

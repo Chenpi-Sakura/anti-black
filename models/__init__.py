@@ -1,16 +1,16 @@
 """
 Local models for AntiBlack system.
 Handles embedding, classification, OCR, and VLM inference.
-Also exports core data entities for MongoDB collections.
+Also exports core data entities for database collections.
 """
-from .embedding import EmbeddingModel
-from .classifier import ClassificationModel
-from .fasttext import FastTextModel
-from .ocr import OCRModel
-from .ollama_client import OllamaClient
-from .cloud_vlm_client import CloudVLMClient
-from .model_manager import ModelManager, get_model_manager, init_models
-from .entities import (
+from .ml.embedding import EmbeddingModel
+from .ml.classifier import ClassificationModel
+from .ml.fasttext import FastTextModel
+from .ml.ocr import OCRModel
+from .clients.ollama import OllamaClient
+from .clients.cloud_vlm import CloudVLMClient
+from .ml.model_manager import ModelManager, get_model_manager, init_models
+from .domain.entities import (
     Entity, MessageRef, SlangMapping, SlangCandidate, QueryTask, Clue,
     Feedback, SeedWord, Proposal, ExportTask, Channel, Metrics, AutoEvolution,
     Conversation,

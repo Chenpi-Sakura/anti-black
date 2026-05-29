@@ -65,8 +65,8 @@ local_models:
   # XGBoost classifier (path to trained model)
   classifier:
     model_type: "xgboost"  # xgboost or linear
-    model_path: "./models/xgboost_classifier.pkl"
-    label_encoder_path: "./models/label_encoder.pkl"
+    model_path: "./models/ml/assets/xgboost_classifier.pkl"
+    label_encoder_path: "./models/ml/assets/xgboost_classifier_label_encoder.pkl"
 
   # FastText language detection
   fasttext:

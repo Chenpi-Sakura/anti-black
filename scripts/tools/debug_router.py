@@ -1,7 +1,7 @@
 """Debug router scoring - output to file"""
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from pipeline.router import Router, RISK_LABEL_TO_SCORE
 

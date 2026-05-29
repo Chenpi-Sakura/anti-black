@@ -117,15 +117,15 @@ class Classifier:
         import joblib
 
         # Find latest classifier model
-        models_dir = './models'
+        models_dir = './models/ml/assets'
         if not os.path.exists(models_dir):
             return
 
         pkl_files = [f for f in os.listdir(models_dir) if f.startswith('classifier_v') and f.endswith('.pkl')]
         if not pkl_files:
             # Fallback to xgboost models
-            xgb_clf = './models/xgboost_classifier.pkl'
-            xgb_le = './models/xgboost_classifier_label_encoder.pkl'
+            xgb_clf = './models/ml/assets/xgboost_classifier.pkl'
+            xgb_le = './models/ml/assets/xgboost_classifier_label_encoder.pkl'
             if os.path.exists(xgb_clf) and os.path.exists(xgb_le):
                 try:
                     self._embedding_clf = joblib.load(xgb_clf)
@@ -460,8 +460,8 @@ class Classifier:
 
             # 6. Save and hot swap
             version = datetime.now().strftime('%Y%m%d_%H%M%S')
-            model_path = f"./models/classifier_v{version}.pkl"
-            os.makedirs('./models', exist_ok=True)
+            model_path = f"./models/ml/assets/classifier_v{version}.pkl"
+            os.makedirs('./models/ml/assets', exist_ok=True)
 
             joblib.dump({
                 'model': clf,
@@ -474,7 +474,7 @@ class Classifier:
 
             # 7. Update classifier model singleton if available
             try:
-                from models.classifier import ClassifierModel
+                from models.ml.classifier import ClassifierModel
                 cm = ClassifierModel.get_instance()
                 cm.hot_swap(model_path)
             except Exception as e:
