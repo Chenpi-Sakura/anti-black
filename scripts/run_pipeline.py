@@ -269,6 +269,8 @@ async def main():
     if confirmed:
         logger.info(f"LLM validated {len(confirmed)} new CONFIRMED slang")
         # 持久化 confirmed slang 到 DB
+        from models.entities import SlangCandidate as DBSlangCandidate, SlangMapping as DBSlangMapping, SlangStatus
+        from utils import generate_id
         for candidate in confirmed:
             db_candidate = DBSlangCandidate(
                 candidate_word=candidate.word,
