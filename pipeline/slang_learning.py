@@ -181,13 +181,43 @@ class SlangLearner:
 
     def _extract_words(self, text: str) -> List[str]:
         """Extract potential slang words from text."""
-        # Extract words that are:
-        # - 2-8 characters
-        # - Not purely numbers
-        # - Not already known
-        import re
-        words = re.findall(r'[一-鿿]{2,8}', text)
-        return [w for w in words if not w.isdigit()]
+        # 方案二：使用 jieba 进行分词和 N-gram 抽取，解决正则硬切分问题
+        try:
+            import jieba
+            words = list(jieba.cut(text))
+            candidates = []
+            
+            def is_valid(w):
+                import re
+                # 去除两端空白和标点
+                w = re.sub(r'^[.,;:?!，。、；：？！\s]+|[.,;:?!，。、；：？！\s]+$', '', w)
+                if len(w) < 2 or len(w) > 8: return False
+                if w.isdigit(): return False
+                # 过滤包含标点符号的词汇
+                if re.search(r'[.,;:?!，。、；：？！]', w): return False
+                # 过滤纯英文字符组如果太短
+                if w.encode('utf-8').isalpha() and len(w) < 3: return False
+                return True
+                
+            for i, w in enumerate(words):
+                # 1-gram
+                import re
+                clean_w = re.sub(r'^[.,;:?!，。、；：？！\s]+|[.,;:?!，。、；：？！\s]+$', '', w)
+                if is_valid(clean_w):
+                    candidates.append(clean_w)
+                # 2-gram 组合相邻词块，防止 jieba 分词过细（如 "抖", "号"）
+                if i < len(words) - 1:
+                    clean_w2 = re.sub(r'^[.,;:?!，。、；：？！\s]+|[.,;:?!，。、；：？！\s]+$', '', words[i+1])
+                    if clean_w and clean_w2:
+                        combined = clean_w + clean_w2
+                        if is_valid(combined):
+                            candidates.append(combined)
+            return candidates
+        except ImportError:
+            # Fallback
+            import re
+            words = re.findall(r'[一-鿿]{2,8}', text)
+            return [w for w in words if not w.isdigit()]
 
     def _should_skip(self, word: str) -> bool:
         """Check if word should be skipped."""
@@ -289,6 +319,7 @@ class SlangLearner:
 
 请返回 JSON 格式：
 {{
+    "refined_word": "如果有截断或多余字符，请提供修正后的准确黑话词汇（否则与候选词一致）",
     "meaning": "该词的含义解释",
     "regex_pattern": "正则表达式模式",
     "test_positive_cases": ["包含该黑话的其他新造短句1", "包含该黑话的其他新造短句2"],
@@ -297,6 +328,7 @@ class SlangLearner:
 }}
 
 要求：
+- refined_word：如果在上下文中发现给定的候选词截取不完整，或者包含了多余的标点/语气词等，请在这里输出修正后最精炼准确的黑话词汇本体。如果没有问题，就保持与原候选词一致。
 - is_valid_slang：如果该词不是有效的黑话，请设为 false。
 - meaning：请结合提供的完整例句上下文，准确分析该黑话的含义。
 - regex_pattern：**必须是通用匹配模式！** 目标是在任意未知文本中抓取该黑话本身。
@@ -347,6 +379,10 @@ class SlangLearner:
             # 保存 regex_pattern
             candidate.regex_pattern = result.get('regex_pattern')
             candidate.meaning = result.get('meaning')
+            refined_word = result.get('refined_word')
+            if refined_word and refined_word != candidate.word and len(refined_word) >= 2:
+                logger.info(f"LLM refined candidate word from '{candidate.word}' to '{refined_word}'")
+                candidate.word = refined_word
 
             # 验证 regex_pattern
             positive_cases = result.get('test_positive_cases', [])
