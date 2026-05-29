@@ -120,8 +120,6 @@ class ErrorBookSampler:
         api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
         model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
 
-        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-
         prompt = f"""You are a black-market intelligence classification expert.
 
 Analyze the following clue and classify it into one of these categories:
@@ -141,14 +139,15 @@ Return JSON:
 }}"""
 
         try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1024,
-                extra_body={"reasoning_effort": "low"},
-                timeout=60
-            )
-            result_text = response.choices[0].message.content
+            async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1024,
+                    extra_body={"reasoning_effort": "low"},
+                    timeout=60
+                )
+                result_text = response.choices[0].message.content
 
             # Remove LLM thinking tags
             result_text = re.sub(r'<\|think_start\|>.*?<\|think_end\|>', '', result_text, flags=re.DOTALL).strip()

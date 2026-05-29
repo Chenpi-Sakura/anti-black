@@ -302,16 +302,19 @@ class Classifier:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    async_client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-                    response = loop.run_until_complete(async_client.chat.completions.create(
-                        model=model,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=512,
-                        extra_body={"reasoning_effort": "low"},
-                        timeout=30
-                    ))
-                    return response.choices[0].message.content
+                    async def fetch():
+                        async with AsyncOpenAI(api_key=api_key, base_url=api_base) as async_client:
+                            response = await async_client.chat.completions.create(
+                                model=model,
+                                messages=[{"role": "user", "content": prompt}],
+                                max_tokens=512,
+                                extra_body={"reasoning_effort": "low"},
+                                timeout=30
+                            )
+                            return response.choices[0].message.content
+                    return loop.run_until_complete(fetch())
                 finally:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
                     loop.close()
 
             with concurrent.futures.ThreadPoolExecutor() as executor:

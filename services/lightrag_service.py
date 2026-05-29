@@ -28,8 +28,6 @@ def create_minimax_complete():
         api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
         model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
 
-        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -40,12 +38,13 @@ def create_minimax_complete():
         messages.append({"role": "user", "content": prompt})
 
         try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                timeout=120
-            )
-            return response.choices[0].message.content
+            async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
+                response = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    timeout=120
+                )
+                return response.choices[0].message.content
         except Exception as e:
             logger.error(f"MiniMax API call failed: {e}")
             return f"Error: {str(e)}"
@@ -67,15 +66,14 @@ def create_ollama_embed():
         model_name: str = model,
         **kwargs,
     ) -> np.ndarray:
-        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-
         try:
-            response = await client.embeddings.create(
-                model=model_name,
-                input=texts
-            )
-            embeddings = [item.embedding for item in response.data]
-            return np.array(embeddings)
+            async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
+                response = await client.embeddings.create(
+                    model=model_name,
+                    input=texts
+                )
+                embeddings = [item.embedding for item in response.data]
+                return np.array(embeddings)
         except Exception as e:
             logger.error(f"Ollama embedding failed: {e}")
             # Return zeros on error

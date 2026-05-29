@@ -293,8 +293,6 @@ class SlangLearner:
         api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
         model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
 
-        client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-
         # FR-SLANG-03: 独立样本原则 - 排除触发验证的消息
         # contexts 存储的是 (message_id, full_text) 元组
         trigger_msg_id = candidate.validation_trigger_msg_id
