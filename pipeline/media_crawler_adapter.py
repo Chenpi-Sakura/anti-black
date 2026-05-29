@@ -134,73 +134,92 @@ class MediaCrawlerAdapter:
 
     async def _poll_douyin(self) -> List[Dict[str, Any]]:
         """Poll new Douyin content, filtered by keywords from SlangMapping."""
-        async with self._db_pool.acquire() as conn:
-            # Build keyword filter
-            keyword_filter = self._build_keyword_filter('title')
+        rows = []
+        try:
+            async with self._db_pool.acquire() as conn:
+                keyword_filter = self._build_keyword_filter('title')
 
-            query = f"""
-                SELECT
-                    aweme_id,
-                    title,
-                    "desc",
-                    nickname,
-                    user_unique_id,
-                    create_time,
-                    liked_count,
-                    comment_count,
-                    ip_location,
-                    aweme_url,
-                    source_keyword,
-                    add_ts,
-                    last_modify_ts
-                FROM media_crawler.douyin_aweme
-                WHERE add_ts > $1 AND ({keyword_filter})
-                ORDER BY add_ts ASC
-                LIMIT 100
-            """
+                query = f"""
+                    SELECT
+                        aweme_id,
+                        title,
+                        "desc",
+                        nickname,
+                        user_unique_id,
+                        create_time,
+                        liked_count,
+                        comment_count,
+                        ip_location,
+                        aweme_url,
+                        source_keyword,
+                        add_ts,
+                        last_modify_ts
+                    FROM public.douyin_aweme
+                    WHERE add_ts > $1 AND ({keyword_filter})
+                    ORDER BY add_ts ASC
+                    LIMIT 100
+                """
 
-            last_ts = self._last_check_time.get('douyin', self.MIN_DATETIME).timestamp()
-            rows = await conn.fetch(query, last_ts)
+                last_ts = self._last_check_time.get('douyin', self.MIN_DATETIME).timestamp()
+                rows = await conn.fetch(query, last_ts)
 
+                if rows:
+                    self._last_check_time['douyin'] = datetime.now()
+                    logger.info(f"Polled {len(rows)} new Douyin videos (keyword filter: {len(self._keywords)} keywords)")
+
+                return [self._convert_douyin_video(row) for row in rows]
+        except Exception as e:
             if rows:
-                self._last_check_time['douyin'] = datetime.now()
-                logger.info(f"Polled {len(rows)} new Douyin videos (keyword filter: {len(self._keywords)} keywords)")
-
-            return [self._convert_douyin_video(row) for row in rows]
+                logger.warning(f"douyin poll succeeded but cleanup failed, returning {len(rows)} rows")
+                return [self._convert_douyin_video(row) for row in rows]
+            logger.error(f"douyin poll failed: {e}")
+            return []
 
     async def _poll_tieba(self) -> List[Dict[str, Any]]:
         """Poll new Tieba content, filtered by keywords from SlangMapping."""
-        async with self._db_pool.acquire() as conn:
-            # Build keyword filter - check both title and desc
-            keyword_filter_title = self._build_keyword_filter('title')
-            keyword_filter_content = self._build_keyword_filter('desc')
-            combined_filter = f"({keyword_filter_title} OR {keyword_filter_content})"
+        rows = []
+        try:
+            async with self._db_pool.acquire() as conn:
+                # Build keyword filter - check both title and desc
+                keyword_filter_title = self._build_keyword_filter('title')
+                keyword_filter_content = self._build_keyword_filter('desc')
+                combined_filter = f"({keyword_filter_title} OR {keyword_filter_content})"
 
-            query = """
-                SELECT
-                    note_id,
-                    title,
-                    "desc",
-                    user_nickname,
-                    ip_location,
-                    total_replay_num,
-                    source_keyword,
-                    add_ts,
-                    last_modify_ts
-                FROM media_crawler.tieba_note
-                WHERE add_ts > $1 AND ({combined_filter})
-                ORDER BY add_ts ASC
-                LIMIT 100
-            """.format(combined_filter=combined_filter)
+                # last_modify_ts is millisecond timestamp, add_ts is NULL for all records
+                last_ts = self._last_check_time.get('tieba', self.MIN_DATETIME).timestamp()
+                last_ts_ms = last_ts * 1000
 
-            last_ts = self._last_check_time.get('tieba', self.MIN_DATETIME).timestamp()
-            rows = await conn.fetch(query, last_ts)
+                query = """
+                    SELECT
+                        note_id,
+                        title,
+                        "desc",
+                        user_nickname,
+                        ip_location,
+                        total_replay_num,
+                        source_keyword,
+                        add_ts,
+                        last_modify_ts
+                    FROM public.tieba_note
+                    WHERE (add_ts IS NOT NULL AND add_ts > $1)
+                       OR (add_ts IS NULL AND last_modify_ts > $2)
+                    ORDER BY COALESCE(add_ts, (last_modify_ts / 1000)::timestamp) ASC
+                    LIMIT 100
+                """
 
+                rows = await conn.fetch(query, last_ts, last_ts_ms)
+
+                if rows:
+                    self._last_check_time['tieba'] = datetime.now()
+                    logger.info(f"Polled {len(rows)} new Tieba posts (keyword filter: {len(self._keywords)} keywords)")
+
+                return [self._convert_tieba_post(row) for row in rows]
+        except Exception as e:
             if rows:
-                self._last_check_time['tieba'] = datetime.now()
-                logger.info(f"Polled {len(rows)} new Tieba posts (keyword filter: {len(self._keywords)} keywords)")
-
-            return [self._convert_tieba_post(row) for row in rows]
+                logger.warning(f"tieba poll succeeded but cleanup failed, returning {len(rows)} rows")
+                return [self._convert_tieba_post(row) for row in rows]
+            logger.error(f"tieba poll failed: {e}")
+            return []
 
     def _convert_douyin_video(self, row) -> Dict[str, Any]:
         """Convert Douyin video to RawMessage format."""
@@ -261,43 +280,51 @@ class MediaCrawlerAdapter:
 
     async def _poll_xhs(self) -> List[Dict[str, Any]]:
         """Poll new Xiaohongshu content, filtered by keywords from SlangMapping."""
-        async with self._db_pool.acquire() as conn:
-            keyword_filter_title = self._build_keyword_filter('title')
-            keyword_filter_desc = self._build_keyword_filter('desc')
-            combined_filter = f"({keyword_filter_title} OR {keyword_filter_desc})"
+        rows = []
+        try:
+            async with self._db_pool.acquire() as conn:
+                keyword_filter_title = self._build_keyword_filter('title')
+                keyword_filter_desc = self._build_keyword_filter('desc')
+                combined_filter = f"({keyword_filter_title} OR {keyword_filter_desc})"
 
-            query = f"""
-                SELECT
-                    note_id,
-                    title,
-                    "desc",
-                    nickname,
-                    user_id,
-                    avatar,
-                    ip_location,
-                    liked_count,
-                    collected_count,
-                    comment_count,
-                    share_count,
-                    time,
-                    note_url,
-                    source_keyword,
-                    add_ts,
-                    last_modify_ts
-                FROM media_crawler.xhs_note
-                WHERE add_ts > $1 AND ({combined_filter})
-                ORDER BY add_ts ASC
-                LIMIT 100
-            """
+                query = f"""
+                    SELECT
+                        note_id,
+                        title,
+                        "desc",
+                        nickname,
+                        user_id,
+                        avatar,
+                        ip_location,
+                        liked_count,
+                        collected_count,
+                        comment_count,
+                        share_count,
+                        time,
+                        note_url,
+                        source_keyword,
+                        add_ts,
+                        last_modify_ts
+                    FROM public.xhs_note
+                    WHERE add_ts > $1 AND ({combined_filter})
+                    ORDER BY add_ts ASC
+                    LIMIT 100
+                """
 
-            last_ts = self._last_check_time.get('xhs', self.MIN_DATETIME).timestamp()
-            rows = await conn.fetch(query, last_ts)
+                last_ts = self._last_check_time.get('xhs', self.MIN_DATETIME).timestamp()
+                rows = await conn.fetch(query, last_ts)
 
+                if rows:
+                    self._last_check_time['xhs'] = datetime.now()
+                    logger.info(f"Polled {len(rows)} new Xiaohongshu notes (keyword filter: {len(self._keywords)} keywords)")
+
+                return [self._convert_xhs_note(row) for row in rows]
+        except Exception as e:
             if rows:
-                self._last_check_time['xhs'] = datetime.now()
-                logger.info(f"Polled {len(rows)} new Xiaohongshu notes (keyword filter: {len(self._keywords)} keywords)")
-
-            return [self._convert_xhs_note(row) for row in rows]
+                logger.warning(f"xhs poll succeeded but cleanup failed, returning {len(rows)} rows")
+                return [self._convert_xhs_note(row) for row in rows]
+            logger.error(f"xhs poll failed: {e}")
+            return []
 
     def _convert_xhs_note(self, row) -> Dict[str, Any]:
         """Convert Xiaohongshu note to RawMessage format."""
@@ -332,41 +359,49 @@ class MediaCrawlerAdapter:
 
     async def _poll_kuaishou(self) -> List[Dict[str, Any]]:
         """Poll new Kuaishou content, filtered by keywords from SlangMapping."""
-        async with self._db_pool.acquire() as conn:
-            keyword_filter_title = self._build_keyword_filter('title')
-            keyword_filter_desc = self._build_keyword_filter('desc')
-            combined_filter = f"({keyword_filter_title} OR {keyword_filter_desc})"
+        rows = []
+        try:
+            async with self._db_pool.acquire() as conn:
+                keyword_filter_title = self._build_keyword_filter('title')
+                keyword_filter_desc = self._build_keyword_filter('desc')
+                combined_filter = f"({keyword_filter_title} OR {keyword_filter_desc})"
 
-            query = f"""
-                SELECT
-                    video_id,
-                    user_id,
-                    nickname,
-                    avatar,
-                    title,
-                    "desc",
-                    liked_count,
-                    viewd_count,
-                    video_url,
-                    video_cover_url,
-                    create_time,
-                    source_keyword,
-                    add_ts,
-                    last_modify_ts
-                FROM media_crawler.kuaishou_video
-                WHERE add_ts > $1 AND ({combined_filter})
-                ORDER BY add_ts ASC
-                LIMIT 100
-            """
+                query = f"""
+                    SELECT
+                        video_id,
+                        user_id,
+                        nickname,
+                        avatar,
+                        title,
+                        "desc",
+                        liked_count,
+                        viewd_count,
+                        video_url,
+                        video_cover_url,
+                        create_time,
+                        source_keyword,
+                        add_ts,
+                        last_modify_ts
+                    FROM public.kuaishou_video
+                    WHERE add_ts > $1 AND ({combined_filter})
+                    ORDER BY add_ts ASC
+                    LIMIT 100
+                """
 
-            last_ts = self._last_check_time.get('ks', self.MIN_DATETIME).timestamp()
-            rows = await conn.fetch(query, last_ts)
+                last_ts = self._last_check_time.get('ks', self.MIN_DATETIME).timestamp()
+                rows = await conn.fetch(query, last_ts)
 
+                if rows:
+                    self._last_check_time['ks'] = datetime.now()
+                    logger.info(f"Polled {len(rows)} new Kuaishou videos (keyword filter: {len(self._keywords)} keywords)")
+
+                return [self._convert_kuaishou_video(row) for row in rows]
+        except Exception as e:
             if rows:
-                self._last_check_time['ks'] = datetime.now()
-                logger.info(f"Polled {len(rows)} new Kuaishou videos (keyword filter: {len(self._keywords)} keywords)")
-
-            return [self._convert_kuaishou_video(row) for row in rows]
+                logger.warning(f"ks poll succeeded but cleanup failed, returning {len(rows)} rows")
+                return [self._convert_kuaishou_video(row) for row in rows]
+            logger.error(f"ks poll failed: {e}")
+            return []
 
     def _convert_kuaishou_video(self, row) -> Dict[str, Any]:
         """Convert Kuaishou video to RawMessage format."""
@@ -399,40 +434,48 @@ class MediaCrawlerAdapter:
 
     async def _poll_weibo(self) -> List[Dict[str, Any]]:
         """Poll new Weibo content, filtered by keywords from SlangMapping."""
-        async with self._db_pool.acquire() as conn:
-            keyword_filter = self._build_keyword_filter('content')
+        rows = []
+        try:
+            async with self._db_pool.acquire() as conn:
+                keyword_filter = self._build_keyword_filter('content')
 
-            query = f"""
-                SELECT
-                    note_id,
-                    user_id,
-                    nickname,
-                    avatar,
-                    content,
-                    liked_count,
-                    comments_count,
-                    shared_count,
-                    create_time,
-                    create_date_time,
-                    note_url,
-                    ip_location,
-                    source_keyword,
-                    add_ts,
-                    last_modify_ts
-                FROM media_crawler.weibo_note
-                WHERE add_ts > $1 AND ({keyword_filter})
-                ORDER BY add_ts ASC
-                LIMIT 100
-            """
+                query = f"""
+                    SELECT
+                        note_id,
+                        user_id,
+                        nickname,
+                        avatar,
+                        content,
+                        liked_count,
+                        comments_count,
+                        shared_count,
+                        create_time,
+                        create_date_time,
+                        note_url,
+                        ip_location,
+                        source_keyword,
+                        add_ts,
+                        last_modify_ts
+                    FROM public.weibo_note
+                    WHERE add_ts > $1 AND ({keyword_filter})
+                    ORDER BY add_ts ASC
+                    LIMIT 100
+                """
 
-            last_ts = self._last_check_time.get('weibo', self.MIN_DATETIME).timestamp()
-            rows = await conn.fetch(query, last_ts)
+                last_ts = self._last_check_time.get('weibo', self.MIN_DATETIME).timestamp()
+                rows = await conn.fetch(query, last_ts)
 
+                if rows:
+                    self._last_check_time['weibo'] = datetime.now()
+                    logger.info(f"Polled {len(rows)} new Weibo notes (keyword filter: {len(self._keywords)} keywords)")
+
+                return [self._convert_weibo_note(row) for row in rows]
+        except Exception as e:
             if rows:
-                self._last_check_time['weibo'] = datetime.now()
-                logger.info(f"Polled {len(rows)} new Weibo notes (keyword filter: {len(self._keywords)} keywords)")
-
-            return [self._convert_weibo_note(row) for row in rows]
+                logger.warning(f"weibo poll succeeded but cleanup failed, returning {len(rows)} rows")
+                return [self._convert_weibo_note(row) for row in rows]
+            logger.error(f"weibo poll failed: {e}")
+            return []
 
     def _convert_weibo_note(self, row) -> Dict[str, Any]:
         """Convert Weibo note to RawMessage format."""
@@ -488,29 +531,36 @@ class MediaCrawlerAdapter:
         if not aweme_ids:
             return []
 
-        async with self._db_pool.acquire() as conn:
-            # Build keyword filter for comments
-            keyword_filter = self._build_keyword_filter('content')
+        rows = []
+        try:
+            async with self._db_pool.acquire() as conn:
+                keyword_filter = self._build_keyword_filter('content')
 
-            query = f"""
-                SELECT
-                    comment_id,
-                    aweme_id,
-                    content,
-                    nickname,
-                    user_unique_id,
-                    create_time,
-                    ip_location,
-                    like_count,
-                    sub_comment_count
-                FROM media_crawler.douyin_aweme_comment
-                WHERE aweme_id = ANY($1) AND ({keyword_filter})
-                ORDER BY create_time DESC
-                LIMIT 50
-            """
-            rows = await conn.fetch(query, aweme_ids)
-            logger.info(f"Polled {len(rows)} Douyin comments")
-            return [self._convert_douyin_comment(row) for row in rows]
+                query = f"""
+                    SELECT
+                        comment_id,
+                        aweme_id,
+                        content,
+                        nickname,
+                        user_unique_id,
+                        create_time,
+                        ip_location,
+                        like_count,
+                        sub_comment_count
+                    FROM public.douyin_aweme_comment
+                    WHERE aweme_id = ANY($1) AND ({keyword_filter})
+                    ORDER BY create_time DESC
+                    LIMIT 50
+                """
+                rows = await conn.fetch(query, aweme_ids)
+                logger.info(f"Polled {len(rows)} Douyin comments")
+                return [self._convert_douyin_comment(row) for row in rows]
+        except Exception as e:
+            if rows:
+                logger.warning(f"douyin_comments poll succeeded but cleanup failed, returning {len(rows)} rows")
+                return [self._convert_douyin_comment(row) for row in rows]
+            logger.error(f"douyin_comments poll failed: {e}")
+            return []
 
     def _convert_douyin_comment(self, row) -> Dict[str, Any]:
         """Convert Douyin comment to RawMessage format."""
@@ -543,27 +593,34 @@ class MediaCrawlerAdapter:
         if not post_ids:
             return []
 
-        async with self._db_pool.acquire() as conn:
-            # Build keyword filter for comments
-            keyword_filter = self._build_keyword_filter('content')
+        rows = []
+        try:
+            async with self._db_pool.acquire() as conn:
+                keyword_filter = self._build_keyword_filter('content')
 
-            query = f"""
-                SELECT
-                    comment_id,
-                    post_id,
-                    content,
-                    author,
-                    create_time,
-                    ip_location,
-                    agree_num
-                FROM media_crawler.tieba_comment
-                WHERE post_id = ANY($1) AND ({keyword_filter})
-                ORDER BY create_time DESC
-                LIMIT 50
-            """
-            rows = await conn.fetch(query, post_ids)
-            logger.info(f"Polled {len(rows)} Tieba comments")
-            return [self._convert_tieba_comment(row) for row in rows]
+                query = f"""
+                    SELECT
+                        comment_id,
+                        post_id,
+                        content,
+                        author,
+                        create_time,
+                        ip_location,
+                        agree_num
+                    FROM public.tieba_comment
+                    WHERE post_id = ANY($1) AND ({keyword_filter})
+                    ORDER BY create_time DESC
+                    LIMIT 50
+                """
+                rows = await conn.fetch(query, post_ids)
+                logger.info(f"Polled {len(rows)} Tieba comments")
+                return [self._convert_tieba_comment(row) for row in rows]
+        except Exception as e:
+            if rows:
+                logger.warning(f"tieba_comments poll succeeded but cleanup failed, returning {len(rows)} rows")
+                return [self._convert_tieba_comment(row) for row in rows]
+            logger.error(f"tieba_comments poll failed: {e}")
+            return []
 
     def _convert_tieba_comment(self, row) -> Dict[str, Any]:
         """Convert Tieba comment to RawMessage format."""

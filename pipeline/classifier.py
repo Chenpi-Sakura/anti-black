@@ -3,6 +3,7 @@ Classification module for AntiBlack pipeline.
 Handles intent classification with rule/model/LLM三层分类.
 """
 import asyncio
+import concurrent.futures
 import logging
 import os
 import re
@@ -101,9 +102,49 @@ class Classifier:
     def __init__(self, config: Dict[str, Any] = None, rules: List[ClassificationRule] = None):
         self.config = config or {}
         self.rules = rules or self.DEFAULT_RULES
-        self.rule_threshold = self.config.get('classification', {}).get('rule_confidence_threshold', 0.9)
+        self.rule_threshold = self.config.get('classification', {}).get('rule_confidence_threshold', 0.7)
         self.embedding_threshold = self.config.get('classification', {}).get('embedding_confidence_threshold', 0.6)
         self.llm_threshold = self.config.get('classification', {}).get('llm_fallback_confidence', 0.6)
+
+        # Load trained embedding classifier if exists
+        self._embedding_clf = None
+        self._embedding_le = None
+        self._load_embedding_model()
+
+    def _load_embedding_model(self):
+        """Load trained sklearn classifier for embedding-based classification."""
+        import os
+        import joblib
+
+        # Find latest classifier model
+        models_dir = './models'
+        if not os.path.exists(models_dir):
+            return
+
+        pkl_files = [f for f in os.listdir(models_dir) if f.startswith('classifier_v') and f.endswith('.pkl')]
+        if not pkl_files:
+            # Fallback to xgboost models
+            xgb_clf = './models/xgboost_classifier.pkl'
+            xgb_le = './models/xgboost_classifier_label_encoder.pkl'
+            if os.path.exists(xgb_clf) and os.path.exists(xgb_le):
+                try:
+                    self._embedding_clf = joblib.load(xgb_clf)
+                    self._embedding_le = joblib.load(xgb_le)
+                    logger.info("Loaded xgboost embedding classifier")
+                except Exception as e:
+                    logger.warning(f"Failed to load xgboost models: {e}")
+            return
+
+        # Load latest version
+        pkl_files.sort(reverse=True)
+        try:
+            model_data = joblib.load(os.path.join(models_dir, pkl_files[0]))
+            self._embedding_clf = model_data.get('model')
+            self._embedding_le = model_data.get('label_encoder')
+            if self._embedding_clf and self._embedding_le:
+                logger.info(f"Loaded embedding classifier: {pkl_files[0]}")
+        except Exception as e:
+            logger.warning(f"Failed to load embedding model: {e}")
 
     def classify(self, text: str, context: Dict[str, Any] = None) -> ClassificationResult:
         """
@@ -160,13 +201,66 @@ class Classifier:
 
     def _classify_by_embedding(self, text: str, context: Dict[str, Any]) -> Optional[ClassificationResult]:
         """
-        Classify using embedding model.
-        In production, this would use a trained classifier on embeddings.
-        For demo, we simulate with lower confidence.
+        Classify using embedding model (Ollama bge-m3 + sklearn classifier).
+        Falls back to None if model not available or Ollama unreachable.
         """
-        # In production: use sentence-transformers + trained classifier
-        # For demo: return None to fall back to LLM
-        return None
+        if not self._embedding_clf or not self._embedding_le:
+            return None
+
+        try:
+            import httpx
+            import numpy as np
+
+            # Get embedding from Ollama
+            OLLAMA_API_URL = "http://localhost:11434/api/embed"
+            EMBEDDING_MODEL = "bge-m3"
+
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    OLLAMA_API_URL,
+                    json={"model": EMBEDDING_MODEL, "input": [text]}
+                )
+                response.raise_for_status()
+                embeddings = response.json().get('embeddings', [])
+                if not embeddings or len(embeddings) == 0:
+                    return None
+
+                embedding = np.array(embeddings[0], dtype=np.float32).reshape(1, -1)
+
+            # Predict using sklearn classifier
+            label_idx = self._embedding_clf.predict(embedding)[0]
+            labels = self._embedding_le.inverse_transform([label_idx])
+            label = labels[0]
+
+            # Get confidence from probability
+            proba = self._embedding_clf.predict_proba(embedding)[0]
+            confidence = float(proba[label_idx])
+
+            # Map label to level1/level2
+            level1, level2 = self._map_label_to_taxonomy(label)
+
+            return ClassificationResult(
+                level1_label=level1,
+                level2_label=level2,
+                confidence=confidence,
+                source='embedding',
+                reason=f'embedding model prediction, label={label}'
+            )
+
+        except Exception as e:
+            logger.debug(f"Embedding classification failed: {e}")
+            return None
+
+    def _map_label_to_taxonomy(self, label: str) -> Tuple[str, str]:
+        """Map embedding model label to taxonomy level1/level2."""
+        label_map = {
+            '账号交易': ('账号交易', '账号买卖'),
+            '流量作弊': ('流量作弊', '刷粉刷赞'),
+            '诈骗引流': ('诈骗引流', '刷单引流'),
+            '黑产工具': ('黑产工具', '接码平台'),
+            '未知/其他': ('未知/其他', '未分类'),
+        }
+        return label_map.get(label, ('未知/其他', '未分类'))
 
     def _classify_by_llm(self, text: str, context: Dict[str, Any]) -> Optional[ClassificationResult]:
         """
@@ -201,19 +295,27 @@ class Classifier:
 仅返回JSON格式的分类结果，不要包含其他内容：
 {{"level1": "类别名", "level2": "子类别", "confidence": 0.0-1.0, "reason": "判断理由"}}"""
 
-        async def _call_llm():
-            async_client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-            response = await async_client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=512,
-                extra_body={"reasoning_effort": "low"},
-                timeout=30
-            )
-            return response.choices[0].message.content
-
         try:
-            result_text = asyncio.run(_call_llm())
+            # Use a workaround to call async code from sync context
+            import concurrent.futures
+            def _call_llm_sync():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    async_client = AsyncOpenAI(api_key=api_key, base_url=api_base)
+                    response = loop.run_until_complete(async_client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=512,
+                        extra_body={"reasoning_effort": "low"},
+                        timeout=30
+                    ))
+                    return response.choices[0].message.content
+                finally:
+                    loop.close()
+
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result_text = executor.submit(_call_llm_sync).result(timeout=60)
 
             # Remove LLM thinking tags
             result_text = re.sub(r'<\|think_start\|>.*?<\|think_end\|>', '', result_text, flags=re.DOTALL).strip()
@@ -242,8 +344,17 @@ class Classifier:
             # FR-EVO-01: Collect silver sample if high confidence
             if confidence >= 0.8:
                 try:
-                    asyncio.run(self._collect_silver_sample(text, classification_result))
-                except RuntimeError as e:
+                    from services.database import PostgreSQLService
+                    db = PostgreSQLService.get_instance()
+                    db.insert_training_sample({
+                        'text': text,
+                        'label': level1_label,
+                        'label_source': 'silver',
+                        'confidence': confidence,
+                        'collection_context': 'llm_fallback'
+                    })
+                    logger.debug(f"Collected silver sample: {text[:50]}...")
+                except Exception as e:
                     logger.warning(f"Failed to collect silver sample: {e}")
 
             return classification_result
@@ -255,24 +366,6 @@ class Classifier:
     def classify_batch(self, texts: List[str], context: Dict[str, Any] = None) -> List[ClassificationResult]:
         """Classify a batch of texts."""
         return [self.classify(text, context) for text in texts]
-
-    # ========== FR-EVO-01: Silver Sample Collection ==========
-
-    async def _collect_silver_sample(self, text: str, result: ClassificationResult):
-        """FR-EVO-01: Write LLM high-confidence output to training_samples table."""
-        try:
-            from services.database import PostgreSQLService
-            db = PostgreSQLService.get_instance()
-            db.insert_training_sample({
-                'text': text,
-                'label': result.level1_label,
-                'label_source': 'silver',
-                'confidence': result.confidence,
-                'collection_context': 'llm_fallback'
-            })
-            logger.debug(f"Collected silver sample: {text[:50]}... -> {result.level1_label}")
-        except Exception as e:
-            logger.warning(f"Failed to collect silver sample: {e}")
 
     # ========== FR-EVO-03: Model Retraining ==========
 

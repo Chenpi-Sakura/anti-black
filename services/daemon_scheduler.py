@@ -108,21 +108,17 @@ class DaemonScheduler:
         """Execute one collection cycle for all platforms."""
         platforms = self.config.get('daemon', {}).get('platforms', ['douyin', 'tieba', 'xhs', 'ks', 'weibo'])
 
-        all_messages = []
         for platform in platforms:
             try:
                 messages = await self._adapter.poll_new_content(platform)
-                all_messages.extend(messages)
-                logger.info(f"Polled {len(messages)} messages from {platform}")
+                if messages:
+                    logger.info(f"Polled {len(messages)} messages from {platform}")
+                    await self._process_messages(messages)
+                else:
+                    logger.info(f"No new messages from {platform}")
             except Exception as e:
-                logger.error(f"Failed to poll {platform}: {e}")
-
-        if not all_messages:
-            logger.warning("No messages polled from any platform")
-            return
-
-        # Process through pipeline
-        await self._process_messages(all_messages)
+                logger.warning(f"Failed to poll {platform}: {e}")
+                continue
 
     async def _process_messages(self, messages: List[Dict[str, Any]]):
         """Process messages through the full pipeline."""
@@ -195,7 +191,7 @@ class DaemonScheduler:
                     source_channel=msg.source_channel,
                     source_group_id=msg.group_id,
                     source_author_id=msg.author_id,
-                    entity_list=[{"entity_type": e.entity_type, "entity_value": e.raw_value, "source": "extractor"} for e in extraction_results[i].entities],
+                    entity_list=[{"entity_type": e.entity_type, "entity_value": e.entity_value, "source": "extractor"} for e in extraction_results[i].entities],
                     slang_mappings=[{"slang": s.slang, "meaning": s.meaning} for s in extraction_results[i].slang_mappings],
                     query_id=None,
                     platform=msg.metadata.get("platform") if msg.metadata else None,
@@ -265,7 +261,7 @@ class DaemonScheduler:
                         "level2_label": classification_results[idx].level2_label
                     },
                     "entities": [
-                        {"entity_type": e.entity_type, "entity_value": e.raw_value}
+                        {"entity_type": e.entity_type, "entity_value": e.entity_value}
                         for e in extraction_results[idx].entities
                     ]
                 })
