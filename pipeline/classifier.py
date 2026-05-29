@@ -295,6 +295,8 @@ class Classifier:
 仅返回JSON格式的分类结果，不要包含其他内容：
 {{"level1": "类别名", "level2": "子类别", "confidence": 0.0-1.0, "reason": "判断理由"}}"""
 
+        logger.info(f"[LLM Call] Triggering Classifier Fallback for text: {text[:30]}...")
+
         try:
             # Use a workaround to call async code from sync context
             import concurrent.futures

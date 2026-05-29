@@ -293,6 +293,12 @@ class SlangLearner:
         api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
         model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
 
+        if not api_key:
+            logger.warning("OPENAI_API_KEY not set, slang LLM validation skipped")
+            return False
+            
+        logger.info(f"[LLM Call] Triggering Slang Validation for candidate: '{candidate.word}'")
+
         # FR-SLANG-03: 独立样本原则 - 排除触发验证的消息
         # contexts 存储的是 (message_id, full_text) 元组
         trigger_msg_id = candidate.validation_trigger_msg_id

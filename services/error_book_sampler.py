@@ -138,6 +138,8 @@ Return JSON:
     "confidence": 0.0-1.0
 }}"""
 
+        logger.info(f"[LLM Call] Triggering Error Book LLM Judge for clue: {clue.get('clue_id')}")
+
         try:
             async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
                 response = await client.chat.completions.create(

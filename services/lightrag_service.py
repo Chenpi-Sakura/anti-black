@@ -36,6 +36,8 @@ def create_minimax_complete():
             messages.append(msg)
 
         messages.append({"role": "user", "content": prompt})
+        
+        logger.info(f"[LLM Call] Triggering LightRAG Graph Extraction/Query (model={model})")
 
         try:
             async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
@@ -66,6 +68,7 @@ def create_ollama_embed():
         model_name: str = model,
         **kwargs,
     ) -> np.ndarray:
+        logger.info(f"[LLM Call] Triggering Ollama Embedding for {len(texts)} texts (model={model_name})")
         try:
             async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
                 response = await client.embeddings.create(
