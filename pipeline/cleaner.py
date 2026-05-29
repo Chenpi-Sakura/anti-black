@@ -83,27 +83,26 @@ class Cleaner:
         if self._is_noise(cleaned_text):
             return None
 
-        # NOTE: Deduplication is disabled to collect maximum data
-        # If needed, re-enable by uncommenting the code below:
-        # # Exact deduplication
-        # text_hash = self._compute_text_hash(cleaned_text)
-        # if text_hash in self._exact_hash_cache:
-        #     logger.debug(f"Duplicate exact hash: {message_id}")
-        #     return None
-        #
-        # # Approximate deduplication
-        # simhash = self._compute_simhash(cleaned_text)
-        # if self._is_approx_duplicate(simhash):
-        #     logger.debug(f"Duplicate simhash: {message_id}")
-        #     return None
-        #
-        # # Add to caches
-        # self._exact_hash_cache.add(text_hash)
-        # self._simhash_cache[text_hash] = simhash
-        #
-        # # Limit cache size
-        # if len(self._exact_hash_cache) > 100000:
-        #     self._trim_cache()
+        # NOTE: Deduplication is now enabled to prevent redundant LLM processing
+        # Exact deduplication
+        text_hash = self._compute_text_hash(cleaned_text)
+        if text_hash in self._exact_hash_cache:
+            logger.debug(f"Duplicate exact hash: {message_id}")
+            return None
+
+        # Approximate deduplication
+        simhash = self._compute_simhash(cleaned_text)
+        if self._is_approx_duplicate(simhash):
+            logger.debug(f"Duplicate simhash: {message_id}")
+            return None
+
+        # Add to caches
+        self._exact_hash_cache.add(text_hash)
+        self._simhash_cache[text_hash] = simhash
+
+        # Limit cache size
+        if len(self._exact_hash_cache) > 100000:
+            self._trim_cache()
 
         return CleanedMessage(
             message_id=message_id,
