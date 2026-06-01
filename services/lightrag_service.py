@@ -68,12 +68,15 @@ def create_ollama_embed():
         model_name: str = model,
         **kwargs,
     ) -> np.ndarray:
+        # Prevent empty strings from causing NaN in Ollama's bge-m3 model
+        safe_texts = [t if t and str(t).strip() else "empty_placeholder" for t in texts]
+        
         logger.info(f"[LLM Call] Triggering Ollama Embedding for {len(texts)} texts (model={model_name})")
         try:
             async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
                 response = await client.embeddings.create(
                     model=model_name,
-                    input=texts
+                    input=safe_texts
                 )
                 embeddings = [item.embedding for item in response.data]
                 return np.array(embeddings)

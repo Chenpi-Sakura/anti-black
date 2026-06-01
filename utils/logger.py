@@ -1,10 +1,16 @@
 import logging
 import sys
 
-# Force stdout to be utf-8 to avoid UnicodeEncodeError with emojis on Windows
+# Force stdout and stderr to be utf-8 to avoid UnicodeEncodeError with emojis on Windows
 if sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
+
+if sys.stderr.encoding.lower() not in ('utf-8', 'utf8'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
     except AttributeError:
         pass
 
