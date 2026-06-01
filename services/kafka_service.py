@@ -26,8 +26,7 @@ class KafkaProducer:
                 bootstrap_servers=self.bootstrap_servers,
                 value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'),
                 key_serializer=lambda k: k.encode('utf-8') if k else None,
-                acks=self.config.get('producer', {}).get('acks', 'all'),
-                retries=self.config.get('producer', {}).get('retries', 3)
+                acks=self.config.get('producer', {}).get('acks', 'all')
             )
             await self._producer.start()
             logger.info(f"Kafka producer connected to {self.bootstrap_servers}")

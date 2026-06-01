@@ -226,6 +226,8 @@ class MediaCrawlerAdapter:
         # Parse timestamp
         create_time = row.get('create_time', 0)
         if isinstance(create_time, int):
+            if create_time > 100000000000:
+                create_time = create_time / 1000
             published_at = datetime.fromtimestamp(create_time).isoformat()
         else:
             published_at = str(create_time)
@@ -255,6 +257,8 @@ class MediaCrawlerAdapter:
         # Parse timestamp
         publish_time = row.get('publish_time', 0)
         if isinstance(publish_time, int):
+            if publish_time > 100000000000:
+                publish_time = publish_time / 1000
             published_at = datetime.fromtimestamp(publish_time).isoformat()
         else:
             published_at = str(publish_time)
@@ -330,6 +334,8 @@ class MediaCrawlerAdapter:
         """Convert Xiaohongshu note to RawMessage format."""
         time_val = row.get('time', 0)
         if isinstance(time_val, int):
+            if time_val > 100000000000:
+                time_val = time_val / 1000
             published_at = datetime.fromtimestamp(time_val).isoformat()
         else:
             published_at = str(time_val)
@@ -407,6 +413,8 @@ class MediaCrawlerAdapter:
         """Convert Kuaishou video to RawMessage format."""
         create_time = row.get('create_time', 0)
         if isinstance(create_time, int):
+            if create_time > 100000000000:
+                create_time = create_time / 1000
             published_at = datetime.fromtimestamp(create_time).isoformat()
         else:
             published_at = str(create_time)
@@ -481,6 +489,8 @@ class MediaCrawlerAdapter:
         """Convert Weibo note to RawMessage format."""
         create_time = row.get('create_time', 0)
         if isinstance(create_time, int):
+            if create_time > 100000000000:
+                create_time = create_time / 1000
             published_at = datetime.fromtimestamp(create_time).isoformat()
         else:
             published_at = str(create_time)
@@ -566,6 +576,8 @@ class MediaCrawlerAdapter:
         """Convert Douyin comment to RawMessage format."""
         create_time = row.get('create_time', 0)
         if isinstance(create_time, int):
+            if create_time > 100000000000:
+                create_time = create_time / 1000
             published_at = datetime.fromtimestamp(create_time).isoformat()
         else:
             published_at = str(create_time)
@@ -626,6 +638,8 @@ class MediaCrawlerAdapter:
         """Convert Tieba comment to RawMessage format."""
         create_time = row.get('create_time', 0)
         if isinstance(create_time, int):
+            if create_time > 100000000000:
+                create_time = create_time / 1000
             published_at = datetime.fromtimestamp(create_time).isoformat()
         else:
             published_at = str(create_time)
@@ -667,6 +681,7 @@ class MediaCrawlerKafkaProducer:
             self._producer = AIOKafkaProducer(
                 bootstrap_servers=self.bootstrap_servers,
                 value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode('utf-8'),
+                key_serializer=lambda k: k.encode('utf-8') if isinstance(k, str) else k,
             )
             await self._producer.start()
             logger.info(f"Kafka producer connected to {self.bootstrap_servers}")

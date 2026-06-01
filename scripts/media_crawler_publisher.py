@@ -13,10 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import get_config
 from pipeline.media_crawler_adapter import MediaCrawlerAdapter, MediaCrawlerKafkaProducer
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from utils.logger import configure_root_logger
+configure_root_logger()
 logger = logging.getLogger(__name__)
 
 
@@ -69,8 +67,9 @@ async def main():
     publisher = MediaCrawlerPublisher(config)
     
     loop = asyncio.get_event_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(publisher.stop()))
+    if os.name != 'nt':
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(publisher.stop()))
         
     try:
         await publisher.start()

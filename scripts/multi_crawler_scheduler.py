@@ -1,11 +1,20 @@
 import os
 import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import logging
+from utils.logger import configure_root_logger
+configure_root_logger()
+logger = logging.getLogger(__name__)
+
 import json
 import time
 import asyncio
 import signal
 import argparse
-from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
@@ -76,12 +85,12 @@ class MultiCrawlerScheduler:
                         if status.get("status") == "idle":
                             return True
                         elif status.get("status") == "error":
-                            print(f"  [ERROR] Crawler error: {status.get('error_message', 'unknown')}")
+                            logger.info(f"  [ERROR] Crawler error: {status.get('error_message', 'unknown')}")
                             return False
             except Exception as e:
-                print(f"  [WARN] Status check failed: {e}")
+                logger.info(f"  [WARN] Status check failed: {e}")
             await asyncio.sleep(10)
-        print(f"  [TIMEOUT] Crawler did not complete within {timeout}s")
+        logger.info(f"  [TIMEOUT] Crawler did not complete within {timeout}s")
         return False
 
     async def start_crawler(self, config: dict) -> bool:
@@ -96,12 +105,12 @@ class MultiCrawlerScheduler:
                 if response.status_code == 200:
                     result = response.json()
                     if result.get("status") == "ok":
-                        print(f"  [OK] Crawler started for {config['platform']}")
+                        logger.info(f"  [OK] Crawler started for {config['platform']}")
                         return True
-                print(f"  [FAIL] Start failed: {response.text}")
+                logger.info(f"  [FAIL] Start failed: {response.text}")
                 return False
         except Exception as e:
-            print(f"  [FAIL] Start exception: {e}")
+            logger.info(f"  [FAIL] Start exception: {e}")
             return False
 
     async def stop_crawler(self) -> bool:
@@ -124,9 +133,9 @@ class MultiCrawlerScheduler:
         cycle = 0
         while self.running:
             cycle += 1
-            print(f"\n{'='*60}")
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Cycle #{cycle} started")
-            print(f"{'='*60}")
+            logger.info(f"\n{'='*60}")
+            logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Cycle #{cycle} started")
+            logger.info(f"{'='*60}")
 
             for platform in platforms:
                 if not self.running:
@@ -135,16 +144,34 @@ class MultiCrawlerScheduler:
                 self.current_platform = platform
                 cfg = PLATFORM_CONFIGS.get(platform)
                 if not cfg:
-                    print(f"[WARN] Unknown platform: {platform}")
+                    logger.info(f"[WARN] Unknown platform: {platform}")
                     continue
 
                 config_file = cfg.get("config_file")
                 config_path = Path(config_file)
 
+                # Fetch dynamic keywords from database (Slang Evolution)
+                try:
+                    from services.database import PostgreSQLService
+                    db = PostgreSQLService.get_instance()
+                    slang_mappings = db.get_all_slang_mappings(verified_only=True)
+                    db_keywords = [m['slang_raw'] for m in slang_mappings if m.get('slang_raw')]
+                    
+                    if db_keywords:
+                        logger.info(f"  [DB SYNC] Fetched {len(db_keywords)} confirmed keywords from Slang Evolution database.")
+                        cfg_keywords = db_keywords
+                    else:
+                        cfg_keywords = cfg["keywords"]
+                except Exception as e:
+                    logger.warning(f"  [WARN] Failed to fetch keywords from DB: {e}. Using default.")
+                    cfg_keywords = cfg["keywords"]
+
                 # Load config from file if exists, otherwise use defaults
                 if config_path.exists():
                     with open(config_path, encoding='utf-8') as f:
                         crawler_config = json.load(f)
+                        # Override with dynamic keywords
+                        crawler_config["keywords"] = ",".join(cfg_keywords)
                 else:
                     # Build from defaults
                     crawler_config = {
@@ -152,31 +179,31 @@ class MultiCrawlerScheduler:
                         "login_type": cfg["login_type"],
                         "crawler_type": cfg["crawler_type"],
                         "save_option": cfg["save_option"],
-                        "keywords": ",".join(cfg["keywords"]),
+                        "keywords": ",".join(cfg_keywords),
                         "headless": False,
                     }
 
-                print(f"\n[{platform.upper()}] Starting crawler...")
-                print(f"  Keywords: {crawler_config.get('keywords', 'N/A')}")
-                print(f"  Save option: {crawler_config.get('save_option', 'N/A')}")
+                logger.info(f"\n[{platform.upper()}] Starting crawler...")
+                logger.info(f"  Keywords: {crawler_config.get('keywords', 'N/A')}")
+                logger.info(f"  Save option: {crawler_config.get('save_option', 'N/A')}")
 
                 # Start crawler
                 success = await self.start_crawler(crawler_config)
                 if not success:
-                    print(f"  [ERROR] Failed to start {platform}, skipping...")
+                    logger.info(f"  [ERROR] Failed to start {platform}, skipping...")
                     continue
 
                 # Wait for completion (max 1 hour per platform)
                 completed = await self.wait_for_completion(timeout=3600)
                 if not completed:
-                    print(f"  [WARN] {platform} did not complete, stopping...")
+                    logger.info(f"  [WARN] {platform} did not complete, stopping...")
                     await self.stop_crawler()
                     await asyncio.sleep(5)
 
-                print(f"  [{platform.upper()}] Done")
+                logger.info(f"  [{platform.upper()}] Done")
 
             if self.running:
-                print(f"\n[DONE] Cycle #{cycle} complete. Sleeping {loop_interval}s before next cycle...")
+                logger.info(f"\n[DONE] Cycle #{cycle} complete. Sleeping {loop_interval}s before next cycle...")
                 await asyncio.sleep(loop_interval)
 
     async def run_single_keyword_batch(self, platform: str, keywords: list):
@@ -186,7 +213,7 @@ class MultiCrawlerScheduler:
         """
         cfg = PLATFORM_CONFIGS.get(platform)
         if not cfg:
-            print(f"[ERROR] Unknown platform: {platform}")
+            logger.info(f"[ERROR] Unknown platform: {platform}")
             return
 
         config = {
@@ -198,20 +225,20 @@ class MultiCrawlerScheduler:
             "headless": False,
         }
 
-        print(f"\n[{platform.upper()}] Starting with {len(keywords)} keywords...")
-        print(f"  Keywords: {config['keywords']}")
+        logger.info(f"\n[{platform.upper()}] Starting with {len(keywords)} keywords...")
+        logger.info(f"  Keywords: {config['keywords']}")
 
         success = await self.start_crawler(config)
         if not success:
-            print(f"  [ERROR] Failed to start crawler")
+            logger.info(f"  [ERROR] Failed to start crawler")
             return
 
         await self.wait_for_completion(timeout=7200)  # 2 hour max
-        print(f"\n[{platform.upper()}] Completed!")
+        logger.info(f"\n[{platform.upper()}] Completed!")
 
     def stop(self):
         """Stop the scheduler"""
-        print("\n[STOP] Shutting down scheduler...")
+        logger.info("\n[STOP] Shutting down scheduler...")
         self.running = False
 
 
@@ -253,15 +280,15 @@ async def main():
         await scheduler.run_platform_sequence(platforms, loop_interval=999999999)
     elif args.daemon:
         # Daemon mode - loop forever
-        print(f"[DAEMON] Starting in daemon mode...")
-        print(f"  Platforms: {platforms}")
-        print(f"  Interval: {args.interval}s")
+        logger.info(f"[DAEMON] Starting in daemon mode...")
+        logger.info(f"  Platforms: {platforms}")
+        logger.info(f"  Interval: {args.interval}s")
         await scheduler.run_platform_sequence(platforms, loop_interval=args.interval)
     else:
         # Default: run sequence once
         await scheduler.run_platform_sequence(platforms, loop_interval=args.interval)
 
-    print("\n[EXIT] Scheduler stopped")
+    logger.info("\n[EXIT] Scheduler stopped")
 
 
 if __name__ == "__main__":

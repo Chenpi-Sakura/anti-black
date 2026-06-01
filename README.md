@@ -62,70 +62,33 @@ antiblack/
 ### 1. 安装依赖
 
 ```bash
+conda activate anti-black
 pip install -r requirements.txt
 ```
 
 ### 2. 配置
 
-编辑 `config.yaml` 和 `.env` 配置数据库、LLM API等连接参数。
+编辑 `config.yaml` 和 `.env` 配置数据库、LLM API、Kafka等连接参数。确保您的 Docker/VM 基础设施已启动。
 
-### 3. 数据采集 + 完整流水线
+### 3. 一键启动微服务集群
 
-```bash
-# 完整流程：数据采集 + 处理
-./run_full_pipeline.sh
+在 Windows 上，系统已全面升级为解耦的微服务架构。您只需要执行以下脚本，即可一键唤醒全部 5 个核心服务：
 
-# 仅运行处理流水线
-conda run -n anti-black python scripts/run_pipeline.py
+```powershell
+.\scripts\start_all.ps1
 ```
 
-### 4. 多平台数据采集
-
-**前提：** 用户需手动启动 Chrome 远程调试：
-```bash
-chrome --remote-debugging-port=1936
-```
-
-**启动采集：**
-```bash
-# 启动 MediaCrawler API 服务
-conda run -n anti-black python scripts/start_media_crawler_api.py
-
-# 在另一个终端启动全平台采集（单次）
-conda run -n anti-black python scripts/multi_crawler_scheduler.py --single -p dy,tieba,ks,wb,xhs
-
-# 或持续运行模式（每15分钟采集一次）
-conda run -n anti-black python scripts/multi_crawler_scheduler.py --daemon -p dy,tieba,ks,wb,xhs --interval 900
-```
+执行后，会自动弹出 5 个带有颜色高亮和时间戳的独立控制台窗口：
+1. **API 服务** (`start_api.py`)：提供数据看板和外部交互接口。
+2. **爬虫底层控制台** (`start_media_crawler_api.py`)：驱动 Playwright 无头浏览器。
+3. **爬虫调度器** (`multi_crawler_scheduler.py`)：定时从数据库拉取最新“黑话（Slang）”，指挥浏览器全网搜寻。
+4. **数据推流端** (`media_crawler_publisher.py`)：将爬虫结果从 PostgreSQL 源源不断地推入 Kafka。
+5. **处理大脑** (`run_daemon.py`)：消费 Kafka 数据，进行大模型洗稿、图谱抽取（LightRAG）和错题本自学习。
 
 **采集结果查看：**
-```bash
-# 直接查询数据库
-conda run -n anti-black python -c "
-import psycopg2, os
-from dotenv import load_dotenv
-load_dotenv()
-conn = psycopg2.connect(host=os.getenv('POSTGRES_HOST'), port=5432, dbname='media_crawler', user='antiblack', password='antiblack123')
-cur = conn.cursor()
-cur.execute('SELECT COUNT(*) FROM public.douyin_aweme')
-print(f'dy: {cur.fetchone()[0]}')
-cur.execute('SELECT COUNT(*) FROM public.tieba_note')
-print(f'tieba: {cur.fetchone()[0]}')
-cur.execute('SELECT COUNT(*) FROM public.xhs_note')
-print(f'xhs: {cur.fetchone()[0]}')
-conn.close()
-"
-```
+您可以随时查看守护进程的控制台输出，或者直接通过 API 查询系统监控状态。
 
-### 5. 运行API服务
-
-```bash
-python main.py
-```
-
-API服务将在 http://127.0.0.1:8000 启动。
-
-### 6. 测试
+### 4. 测试
 
 ```bash
 pytest tests/ -v

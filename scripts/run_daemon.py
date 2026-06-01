@@ -19,14 +19,8 @@ from services.daemon_scheduler import DaemonScheduler
 log_file = "./logs/antiblack_daemon.log"
 os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
-)
+from utils.logger import configure_root_logger
+configure_root_logger(log_file=log_file)
 logger = logging.getLogger(__name__)
 
 
