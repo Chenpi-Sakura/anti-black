@@ -657,13 +657,9 @@ class MediaCrawlerKafkaProducer:
     def __init__(self, kafka_bootstrap_servers: str):
         self.bootstrap_servers = kafka_bootstrap_servers
         self._producer = None
-        self._demo_mode = True
 
     async def start(self) -> None:
         """Initialize Kafka producer."""
-        if self._demo_mode:
-            logger.info("Kafka producer running in demo mode (MediaCrawler)")
-            return
 
         try:
             from aiokafka import AIOKafkaProducer
@@ -675,8 +671,8 @@ class MediaCrawlerKafkaProducer:
             await self._producer.start()
             logger.info(f"Kafka producer connected to {self.bootstrap_servers}")
         except Exception as e:
-            logger.warning(f"Failed to connect to Kafka, using demo mode: {e}")
-            self._demo_mode = True
+            logger.error(f"Failed to connect to Kafka: {e}")
+            raise e
 
     async def stop(self) -> None:
         """Stop Kafka producer."""
@@ -695,11 +691,9 @@ class MediaCrawlerKafkaProducer:
         Returns:
             Number of messages sent
         """
-        if self._demo_mode:
-            logger.info(f"[Demo] Would send {len(messages)} messages to {topic}")
-            for msg in messages[:3]:
-                logger.info(f"  - {msg.get('message_id')}: {msg.get('raw_text', '')[:50]}...")
-            return len(messages)
+        if not self._producer:
+            logger.error("MediaCrawler Kafka producer not initialized")
+            return 0
 
         sent = 0
         for msg in messages:

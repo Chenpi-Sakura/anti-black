@@ -18,16 +18,8 @@ class KafkaProducer:
         self.config = config or {}
         self._producer = None
 
-        # In demo mode, we use a mock producer
-        self._demo_mode = True
-        self._pending_messages: Dict[str, List[Dict]] = {}
-
     async def start(self) -> None:
         """Initialize producer connection."""
-        if self._demo_mode:
-            logger.info("Kafka producer running in demo mode")
-            return
-
         try:
             from aiokafka import AIOKafkaProducer
             self._producer = AIOKafkaProducer(
@@ -40,8 +32,8 @@ class KafkaProducer:
             await self._producer.start()
             logger.info(f"Kafka producer connected to {self.bootstrap_servers}")
         except Exception as e:
-            logger.warning(f"Failed to connect to Kafka, using demo mode: {e}")
-            self._demo_mode = True
+            logger.error(f"Failed to connect to Kafka: {e}")
+            raise e
 
     async def stop(self) -> None:
         """Stop producer connection."""
@@ -51,16 +43,9 @@ class KafkaProducer:
 
     async def send(self, topic: str, value: Dict[str, Any], key: str = None) -> bool:
         """Send a message to a topic."""
-        if self._demo_mode:
-            if topic not in self._pending_messages:
-                self._pending_messages[topic] = []
-            self._pending_messages[topic].append({
-                'key': key,
-                'value': value,
-                'timestamp': datetime.utcnow().isoformat()
-            })
-            logger.debug(f"Demo: stored message in topic {topic}")
-            return True
+        if not self._producer:
+            logger.error("Kafka producer is not initialized.")
+            return False
 
         try:
             await self._producer.send_and_wait(topic, value, key=key)
@@ -90,15 +75,8 @@ class KafkaConsumer:
         self._consumer = None
         self._running = False
 
-        # In demo mode, use mock data
-        self._demo_mode = True
-
     async def start(self) -> None:
         """Initialize consumer connection."""
-        if self._demo_mode:
-            logger.info("Kafka consumer running in demo mode")
-            return
-
         try:
             from aiokafka import AIOKafkaConsumer
             self._consumer = AIOKafkaConsumer(
@@ -113,8 +91,8 @@ class KafkaConsumer:
             self._running = True
             logger.info(f"Kafka consumer connected to {self.bootstrap_servers}, topics: {self.topics}")
         except Exception as e:
-            logger.warning(f"Failed to connect to Kafka, using demo mode: {e}")
-            self._demo_mode = True
+            logger.error(f"Failed to connect to Kafka: {e}")
+            raise e
 
     async def stop(self) -> None:
         """Stop consumer connection."""
@@ -125,12 +103,15 @@ class KafkaConsumer:
 
     async def consume(self, handler: Callable[[Dict[str, Any]], None], max_messages: int = 100) -> int:
         """Consume messages and process with handler."""
-        if self._demo_mode:
-            return await self._consume_demo(handler, max_messages)
+        if not self._consumer:
+            logger.error("Kafka consumer is not initialized.")
+            return 0
 
         processed = 0
         try:
             async for msg in self._consumer:
+                if not self._running:
+                    break
                 try:
                     await handler(msg.value)
                     processed += 1
@@ -142,58 +123,6 @@ class KafkaConsumer:
             logger.error(f"Error consuming messages: {e}")
 
         return processed
-
-    async def _consume_demo(self, handler: Callable[[Dict[str, Any]], Any], max_messages: int) -> int:
-        """Demo mode consumption - generate mock messages."""
-        processed = 0
-        mock_messages = self._generate_mock_messages(max_messages)
-
-        for msg in mock_messages:
-            try:
-                await handler(msg)
-                processed += 1
-            except Exception as e:
-                logger.error(f"Error processing mock message: {e}")
-
-        return processed
-
-    def _generate_mock_messages(self, count: int) -> List[Dict[str, Any]]:
-        """Generate mock messages for demo."""
-        messages = []
-        templates = [
-            {
-                'message_id': 'msg_001',
-                'source_channel': 'telegram',
-                'group_id': 'tg_group_001',
-                'author_id': 'user_001',
-                'raw_text': '出抖号，千粉，换绑稳，加V:dyhao668',
-                'published_at': '2026-05-23T10:00:00+08:00'
-            },
-            {
-                'message_id': 'msg_002',
-                'source_channel': 'telegram',
-                'group_id': 'tg_group_001',
-                'author_id': 'user_002',
-                'raw_text': '接码平台新开，联系电话13800138000',
-                'published_at': '2026-05-23T10:05:00+08:00'
-            },
-            {
-                'message_id': 'msg_003',
-                'source_channel': 'forum',
-                'group_id': 'forum_tieba_001',
-                'author_id': 'forum_user_001',
-                'raw_text': '专业刷粉，价格优惠，微信:brushdan001',
-                'published_at': '2026-05-23T10:10:00+08:00'
-            }
-        ]
-
-        for i in range(count):
-            template = templates[i % len(templates)]
-            msg = template.copy()
-            msg['message_id'] = f"{template['message_id']}_{i}"
-            messages.append(msg)
-
-        return messages
 
 
 class KafkaManager:
@@ -217,13 +146,16 @@ class KafkaManager:
 
     def get_consumer(self, topic: str, group_id: str) -> KafkaConsumer:
         """Get or create a consumer for a topic."""
-        consumer = KafkaConsumer(
-            bootstrap_servers=self.bootstrap_servers,
-            topics=[topic],
-            group_id=group_id,
-            config=self.config
-        )
-        return consumer
+        key = f"{topic}_{group_id}"
+        if key not in self._consumers:
+            consumer = KafkaConsumer(
+                bootstrap_servers=self.bootstrap_servers,
+                topics=[topic],
+                group_id=group_id,
+                config=self.config
+            )
+            self._consumers[key] = consumer
+        return self._consumers[key]
 
     async def send_to_topic(self, topic: str, message: Dict[str, Any]) -> bool:
         """Send a message to a topic."""

@@ -28,7 +28,7 @@ class DaemonScheduler:
         self.config = config
         self._running = False
         self._tasks: List[asyncio.Task] = []
-        self._adapter = None
+        self.kafka_manager = None
         self._slang_learner = None
         self._browser_automator = None
 
@@ -44,7 +44,7 @@ class DaemonScheduler:
         await self._initialize_components()
 
         # Start all loops
-        self._tasks.append(asyncio.create_task(self._collection_loop()))
+        self._tasks.append(asyncio.create_task(self._kafka_consumer_loop()))
         self._tasks.append(asyncio.create_task(self._slang_evolution_loop()))
         self._tasks.append(asyncio.create_task(self._error_book_loop()))
         self._tasks.append(asyncio.create_task(self._retrain_check_loop()))
@@ -57,11 +57,12 @@ class DaemonScheduler:
 
     async def _initialize_components(self):
         """Initialize shared components."""
-        # Initialize MediaCrawler adapter
-        from pipeline.media_crawler_adapter import MediaCrawlerAdapter
-        self._adapter = MediaCrawlerAdapter(self.config)
-        await self._adapter.initialize()
-        logger.info("MediaCrawler adapter initialized")
+        # Initialize Kafka manager
+        from services.kafka_service import KafkaManager
+        kafka_servers = self.config.get('kafka', {}).get('bootstrap_servers', 'localhost:9092')
+        self.kafka_manager = KafkaManager(bootstrap_servers=kafka_servers, config=self.config)
+        await self.kafka_manager.start()
+        logger.info("Kafka Manager initialized")
 
         # Initialize SlangLearner
         from pipeline.slang_learning import SlangLearner
@@ -85,40 +86,37 @@ class DaemonScheduler:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
-        # Finalize adapter
-        if self._adapter:
-            await self._adapter.finalize()
+        # Finalize components
+        if self.kafka_manager:
+            await self.kafka_manager.stop()
 
         logger.info("AntiBlack Daemon stopped")
 
-    async def _collection_loop(self):
-        """Poll content from all platforms every 15 minutes."""
-        interval = self.config.get('daemon', {}).get('collection_interval_seconds', 900)
-        logger.info(f"Collection loop started (interval: {interval}s)")
+    async def _kafka_consumer_loop(self):
+        """Consume messages from Kafka raw.messages topic continuously."""
+        topic = self.config.get('kafka', {}).get('topics', {}).get('raw_messages', 'raw.messages')
+        group_id = self.config.get('kafka', {}).get('consumer_group', 'antiblack_pipeline')
+        
+        logger.info(f"Kafka consumer loop started for topic: {topic}, group: {group_id}")
+        
+        consumer = self.kafka_manager.get_consumer(topic, group_id)
+        await consumer.start()
 
         while self._running:
             try:
-                await self._run_collection()
+                # Consume messages in small batches
+                await consumer.consume(self._process_kafka_message, max_messages=50)
             except Exception as e:
-                logger.error(f"Collection error: {e}", exc_info=True)
+                logger.error(f"Kafka consume error: {e}", exc_info=True)
+                
+            await asyncio.sleep(1)
 
-            await asyncio.sleep(interval)
-
-    async def _run_collection(self):
-        """Execute one collection cycle for all platforms."""
-        platforms = self.config.get('daemon', {}).get('platforms', ['douyin', 'tieba', 'xhs', 'ks', 'weibo'])
-
-        for platform in platforms:
-            try:
-                messages = await self._adapter.poll_new_content(platform)
-                if messages:
-                    logger.info(f"Polled {len(messages)} messages from {platform}")
-                    await self._process_messages(messages)
-                else:
-                    logger.info(f"No new messages from {platform}")
-            except Exception as e:
-                logger.warning(f"Failed to poll {platform}: {e}")
-                continue
+    async def _process_kafka_message(self, msg: Dict[str, Any]):
+        """Handler for single Kafka message."""
+        try:
+            await self._process_messages([msg])
+        except Exception as e:
+            logger.error(f"Failed to process message {msg.get('message_id')}: {e}")
 
     async def _process_messages(self, messages: List[Dict[str, Any]]):
         """Process messages through the full pipeline."""
