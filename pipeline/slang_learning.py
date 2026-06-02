@@ -13,7 +13,11 @@ from typing import Any, Dict, List, Optional, Set
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from collections import defaultdict
+
+import emoji
 from openai import AsyncOpenAI
+
+from config.slang_blacklist import is_blacklisted
 
 logger = logging.getLogger(__name__)
 
@@ -226,44 +230,111 @@ class SlangLearner:
         return discovered
 
     def _extract_words(self, text: str) -> List[str]:
-        """Extract potential slang words from text."""
-        # 方案二：使用 jieba 进行分词和 N-gram 抽取，解决正则硬切分问题
+        """Extract potential slang words from text.
+
+        Three paths, deduplicated, all gated by `is_blacklisted` (TTL-aware):
+          A) jieba CJK tokenization (1-gram + adjacent 2-gram) — primary path for CJK
+          B) Emoji-adjacent sliding window — captures '加微💰', '出号😈', 'v🔞', '👩‍💻代练'
+          C) emoji.distinct_emoji_list — pure emoji & ZWJ composites jieba/regex miss
+
+        Length is bounded at 1-8 codepoints. Single-char tokens are only
+        accepted when they are an emoji (single CJK chars are too noisy).
+        """
+        _CJK = re.compile(r'[一-鿿぀-ゟ가-힯]')
+        _PUNCT_HAS = re.compile(r'[.,;:?!，。、；：？！]')
+        _PUNCT_TRIM = re.compile(r'^[.,;:?!，。、；：？！\s]+|[.,;:?!，。、；：？！\s]+$')
+
+        candidates: List[str] = []
+        seen: Set[str] = set()
+
+        def is_valid(w: str) -> bool:
+            if not w or w.isdigit():
+                return False
+            if _PUNCT_HAS.search(w):
+                return False
+            # Pure ASCII alpha must be >= 3 chars (avoid "ab" noise)
+            try:
+                if w.encode('utf-8').isalpha() and len(w) < 3:
+                    return False
+            except UnicodeEncodeError:
+                pass
+            n = len(w)
+            if n == 1:
+                return emoji.is_emoji(w)
+            if n > 8:
+                return False
+            # Must contain CJK or at least one emoji codepoint
+            if not (_CJK.search(w) or any(emoji.is_emoji(c) for c in w)):
+                return False
+            if is_blacklisted(w):
+                return False
+            return True
+
+        def add(w: str) -> None:
+            if not w:
+                return
+            w = _PUNCT_TRIM.sub('', w)
+            if is_valid(w) and w not in seen:
+                candidates.append(w)
+                seen.add(w)
+
+        # === Path A: jieba CJK tokenization ===
         try:
             import jieba
-            words = list(jieba.cut(text))
-            candidates = []
-            
-            def is_valid(w):
-                import re
-                # 去除两端空白和标点
-                w = re.sub(r'^[.,;:?!，。、；：？！\s]+|[.,;:?!，。、；：？！\s]+$', '', w)
-                if len(w) < 2 or len(w) > 8: return False
-                if w.isdigit(): return False
-                # 过滤包含标点符号的词汇
-                if re.search(r'[.,;:?!，。、；：？！]', w): return False
-                # 过滤纯英文字符组如果太短
-                if w.encode('utf-8').isalpha() and len(w) < 3: return False
-                return True
-                
-            for i, w in enumerate(words):
-                # 1-gram
-                import re
-                clean_w = re.sub(r'^[.,;:?!，。、；：？！\s]+|[.,;:?!，。、；：？！\s]+$', '', w)
-                if is_valid(clean_w):
-                    candidates.append(clean_w)
-                # 2-gram 组合相邻词块，防止 jieba 分词过细（如 "抖", "号"）
-                if i < len(words) - 1:
-                    clean_w2 = re.sub(r'^[.,;:?!，。、；：？！\s]+|[.,;:?!，。、；：？！\s]+$', '', words[i+1])
-                    if clean_w and clean_w2:
-                        combined = clean_w + clean_w2
-                        if is_valid(combined):
-                            candidates.append(combined)
-            return candidates
+            toks = list(jieba.cut(text))
+            for i, t in enumerate(toks):
+                add(t)
+                if i + 1 < len(toks):
+                    add(t + toks[i + 1])
         except ImportError:
-            # Fallback
-            import re
-            words = re.findall(r'[一-鿿]{2,8}', text)
-            return [w for w in words if not w.isdigit()]
+            for m in re.finditer(r'[一-鿿]{2,8}', text):
+                add(m.group(0))
+
+        # === Path B: emoji-adjacent sliding window ===
+        # For each emoji cluster, extend up to 4 CJK / ASCII-letter chars on each
+        # side, then emit every (left_n, right_n) sub-window containing the cluster.
+        n = len(text)
+        i = 0
+        while i < n:
+            if emoji.is_emoji(text[i]):
+                # Greedy join trailing ZWJ / VS16 / chained emoji into one cluster
+                j = i + 1
+                while j < n and (
+                    text[j] in '‍️'
+                    or (text[j - 1] == '‍' and emoji.is_emoji(text[j]))
+                ):
+                    j += 1
+                cluster = text[i:j]
+                # Left context (up to 4 chars of CJK or ASCII letter)
+                l_start = i
+                while (
+                    l_start > 0
+                    and i - l_start < 4
+                    and (_CJK.match(text[l_start - 1]) or text[l_start - 1].isalpha())
+                ):
+                    l_start -= 1
+                # Right context (up to 4 chars)
+                r_end = j
+                while (
+                    r_end < n
+                    and r_end - j < 4
+                    and (_CJK.match(text[r_end]) or text[r_end].isalpha())
+                ):
+                    r_end += 1
+                left = text[l_start:i]
+                right = text[j:r_end]
+                for ll in range(len(left) + 1):
+                    for rr in range(len(right) + 1):
+                        add(left[len(left) - ll:] + cluster + right[:rr])
+                i = j
+            else:
+                i += 1
+
+        # === Path C: pure emoji & ZWJ composites the other paths miss ===
+        for cluster in emoji.distinct_emoji_list(text):
+            add(cluster)
+
+        return candidates
 
     def _should_skip(self, word: str) -> bool:
         """Check if word should be skipped."""
@@ -412,7 +483,7 @@ class SlangLearner:
             return False
 
         # ---- 三段式 Prompt：人设 + 核心防误判 + 对抗性样本 ----
-        prompt = f"""你是一个顶级的【黑产风控情报专家】。你的任务是鉴定给定的词汇是否为黑产（如诈骗引流、刷单作弊、帐号买卖）为了规避平台审查而发明的【专属暗语/代称/行话】。
+        prompt = f"""你是一个顶级的【黑产风控情报专家】。本系统聚焦【字节跳动旗下产品的黑灰产业】（抖音 / TikTok / 头条 / 西瓜 / 飞书 / 豆包 / 剪映 等）。你的任务是鉴定给定的词汇是否为字节系黑产（如账号买卖、刷量刷粉、私域引流、规避审查代称）发明的【专属暗语/代称/行话】。
 
 候选词: {candidate.word}
 
@@ -421,19 +492,32 @@ class SlangLearner:
 
 【核心防误判规则】（必须严格遵守，违者零分）：
 1. 如果该词在语料中仅仅是"被交易的客体"或"正常名词"（如：游戏名"王者荣耀"、App名"微信"、星座名"十二星座"），它绝对不是黑话，is_valid_slang 必须为 false。
-2. 如果该词是常见的日常动词/形容词（如："买卖"、"加好友"），哪怕它出现在违规帖子里，它也不是黑话。黑话必须具备"隐蔽性"或"特定圈子属性"（如："出抖号"、"小国标"、"上岸"）。
+2. 如果该词是常见的日常动词/形容词（如："买卖"、"加好友"），哪怕它出现在违规帖子里，它也不是黑话。黑话必须具备"隐蔽性"或"特定圈子属性"（如："出抖号"、"音符"、"换绑即可绝不找回"）。
+3. **本系统不关心非字节系游戏账号交易**（三角洲行动 / 和平精英 / 王者荣耀 等都是腾讯系），与游戏租号/代练/卖号相关的词必须 is_valid_slang=false，理由写明"非字节系业务范畴"。
+4. **绝对拒绝以下类别**（不论上下文）：
+   - 内容标签 / 话题标签（"原创"、"搞笑"、"日常"、"笔记"、"合集"）
+   - 通用商务平台词（"合作"、"报价"、"平台"、"运营"、"开通"）
+   - 用户画像（"大学生"、"甜妹"、"未成年"）
+   - 文本截断碎片（如以"的"、"了"开头/结尾的不完整句子）
+   - 平台官方词（"DOU+"、"蒲公英"、"闲鱼"、"抖音"）
+   - 反诈宣传词（"反诈骗"、"立案调查"、"防诈骗"）
+
+【emoji / 符号保留规则】（重要）：
+- 候选词若包含 emoji（💰😈🔞👩‍💻等）或特殊符号（v/+/➗/❤️等），refined_word 和 regex_pattern **必须完整保留这些字符**，不可替换为文字描述、不可删除。
+- 黑产为规避审查刻意使用 emoji/谐音/符号替代（如 "加微💰" = 加微信谈价，"音符" = 抖音平台），这些 emoji 本身就是黑话的关键组成。
+- regex 用 Python re 模块语法即可（Python re 原生支持 UTF-8 emoji，无需特殊转义）。
 
 【正则与对抗性样本规则】：
 1. 正则 (regex_pattern)：必须精准，既不能硬编码无用的语气词，也不能过度泛化导致误杀正常语句。
-2. 正例 (test_positive_cases)：造 2 个黑产语境的短句，必须能被你的正则匹配。
+2. 正例 (test_positive_cases)：造 2 个【字节系】黑产语境的短句，必须能被你的正则匹配。
 3. 对抗性负例 (test_negative_cases)：造 2 个【包含该候选词核心字眼，但语境完全日常、合法】的短句！例如，如果候选词是"种草"，负例必须是"我在阳台种草"，绝不能用"今天天气很好"这种毫无关联的废话。你的正则绝对不能匹配这两个负例！
 
 请严格返回 JSON 格式（不要包含 markdown 代码块标记）：
 {{
-    "refined_word": "修正后的黑话词汇本体（若无修正则与候选词一致）",
-    "meaning": "该词的含义解释",
-    "regex_pattern": "正则表达式模式",
-    "test_positive_cases": ["黑产语境正例1", "黑产语境正例2"],
+    "refined_word": "修正后的黑话词汇本体（含 emoji/符号，与候选词一致或仅修正错别字）",
+    "meaning": "该词在字节系黑产场景下的含义解释",
+    "regex_pattern": "Python re 正则模式（保留 emoji/符号原貌）",
+    "test_positive_cases": ["字节系黑产语境正例1", "字节系黑产语境正例2"],
     "test_negative_cases": ["含候选词字眼但日常合法的负例1", "含候选词字眼但日常合法的负例2"],
     "is_valid_slang": true/false
 }}"""

@@ -58,6 +58,9 @@ models/**/*.bin
 # Logs
 *.log
 
+# Slang blacklist runtime state (TTL expiry timestamps, regenerated on first import)
+data/slang_blacklist_state.json
+
 # OS
 .DS_Store
 Thumbs.db

@@ -165,7 +165,12 @@ slang_learning:
     dynamic_threshold_factor: 1.5  # Multiply threshold when token budget low
   # 淘汰与回测配置 (Elimination and Backtesting)
   elimination:
-    min_occurrences: 200
+    # 2026-06-02 沙盘: 之前 min_occurrences=200 导致 0 candidates 触发 demote (所有
+    # CONFIRMED 都 < 200 occ). 调低到 100 让 demote 真正生效 (只有 账号出售 occ=122
+    # 在 100-200 区间, 1 个真实 slang 受影响, 低误杀风险).
+    min_occurrences: 100
+    # 2026-06-02 沙盘: min_hit_rate 0.05 → 0.10 对当前数据 ZERO 影响 (瓶颈在 occ
+    # 不是 hit_rate). 保持 0.05 兜底.
     min_hit_rate: 0.05
     backtest_threshold: 0.6
     backtest_timeout_seconds: 0.5

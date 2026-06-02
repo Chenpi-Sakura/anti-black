@@ -1,0 +1,1841 @@
+{
+  "audit_at": "2026-06-02T11:31:59.608494Z",
+  "model": "qwen3.6-flash",
+  "total": 183,
+  "is_slang_true": 18,
+  "is_slang_false": 165,
+  "is_slang_unknown": 0,
+  "high_conf_false_for_cleanup": 165,
+  "items": [
+    {
+      "slang_raw": "微信号教程来了",
+      "occurrence_count": 188,
+      "status": "CONFIRMED",
+      "meaning": "该短语通常出现在教程或推广内容中，意为“微信号设计教程已发布”，常结合生日、星座等元素吸引用户关注，用于引流或营销。在提供的例句中，它被大量重复使用，配合#微信号、#豆包ai等标签，可能是一种特定的引流模式。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 96,
+      "reason": "属常规的个人微信号个性化设置教程分享用语，语境为生活营销与AI工具使用，无黑灰产交易或违规特征。"
+    },
+    {
+      "slang_raw": "螃蟹帐号",
+      "occurrence_count": 144,
+      "status": "CONFIRMED",
+      "meaning": "指代‘螃蟹游戏服务网’提供的游戏账号，常用于游戏号的换绑、转让等操作，亦作为该平台或服务的标签使用。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 92,
+      "reason": "为特定游戏交易平台的品牌业务标签，语境明确指向官方安全换绑教程，属平台行业词而非隐蔽暗语。"
+    },
+    {
+      "slang_raw": "音小店官方号的操",
+      "occurrence_count": 144,
+      "status": "CONFIRMED",
+      "meaning": "该黑话指代抖音小店（抖店）官方账号的解绑或更换绑定的操作方法/教程。'音小店'为'抖小店'的谐音误写，'的操'是'的操作'的缩写，整体含义为'抖店官方号的操作'。常见于电商运营者分享关于如何解绑、更换抖音小店官方认证账号的实操经验。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "系“抖店官方号的操作”的残缺截取，用于电商运营者分享店铺绑定解绑规则，属常规平台操作术语。"
+    },
+    {
+      "slang_raw": "官方教程请收好",
+      "occurrence_count": 144,
+      "status": "CONFIRMED",
+      "meaning": "官方教程请收好",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "属内容创作者通用的引导性话术，广泛存在于各类正规教程中，无任何黑灰产属性。"
+    },
+    {
+      "slang_raw": "个体抖店也可以更",
+      "occurrence_count": 144,
+      "status": "CONFIRMED",
+      "meaning": "该短语是'个体抖店也可以更换绑定官方抖音号了'的残缺版本，'更'字不完整，不构成完整的网络黑话含义。个体抖店指抖音平台的个体工商户店铺，该短语原本想表达个体抖店也可以更换绑定官方抖音号的功能，但作为黑话候选词过于残缺和不完整。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "系平台政策说明语句的机械截断，原意为个体店铺功能更新，属常规电商运营描述。"
+    },
+    {
+      "slang_raw": "信号啦",
+      "occurrence_count": 132,
+      "status": "CONFIRMED",
+      "meaning": "在情侣语境中，‘信号啦’是‘微信号啦’的简称，指微信账号，尤其是指独特的情侣微信号。它通过省略‘微’字并添加语气词‘啦’形成，属于情侣之间的特定俚语，用于隐蔽地表达微信号这一概念。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 97,
+      "reason": "实为“微信号啦”在长句中的截断或口语化残留，语境为情侣分享生活，非黑产代称。"
+    },
+    {
+      "slang_raw": "微信情侣",
+      "occurrence_count": 132,
+      "status": "CONFIRMED",
+      "meaning": "“微信情侣”指代情侣在微信平台上专用的账号、ID或头像等，通常在社交媒体上作为话题标签（如 #微信情侣id）使用，表示该微信号是情侣专属或代表两人关系的内容。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "属社交媒体常见的个人情感与生活类话题标签，用于展示情侣专属ID，与黑灰产无关。"
+    },
+    {
+      "slang_raw": "们的独一无二的微",
+      "occurrence_count": 132,
+      "status": "CONFIRMED",
+      "meaning": "们的独一无二的微",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "系正常分享语句被系统错误截断产生的残缺片段，无独立语义，更非黑话。"
+    },
+    {
+      "slang_raw": "是她的名字首字母",
+      "occurrence_count": 130,
+      "status": "CONFIRMED",
+      "meaning": "该短语用于说明某个字母或符号代表某人的名字首字母，常见于情侣或亲密关系中，双方用各自名字的首字母组合来制作专属标识（如微信号、情侣ID等），属于一种甜蜜的暗语表达。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "属日常分享情侣专属标识设计思路的描述性语句，完全属于普通中文表达。"
+    },
+    {
+      "slang_raw": "是我们在一起的日",
+      "occurrence_count": 130,
+      "status": "CONFIRMED",
+      "meaning": "是我们在一起的日",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "系记录恋爱纪念日的正常语句截断，属于日常生活分享范畴，无任何黑灰产关联。"
+    },
+    {
+      "slang_raw": "是爱",
+      "occurrence_count": 130,
+      "status": "CONFIRMED",
+      "meaning": "“是爱”是一种网络用语，常用于表达对某人或某事的喜爱或赞美，意为‘……是爱’、‘太爱了’或‘热爱’。在情侣或粉丝圈中，常用它来突出感情的强烈或对事物的追捧。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "语境为情侣定制微信号的浪漫表达，属日常情感用语，与黑灰产无关。"
+    },
+    {
+      "slang_raw": "终于换上了属于我",
+      "occurrence_count": 130,
+      "status": "CONFIRMED",
+      "meaning": "网络情侣/亲密关系场景下的用语，表示终于获得了属于自己（或两人）独一无二的专属ID、头像或个性化标记。带有强烈的幸福感和满足感，常见于情侣宣布换上了专属微信号、情侣ID等场景。核心语义是强调'终于'（期盼已久）加上'属于'（专属、独一无二）的组合。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "普通社交分享用语，描述更换专属微信号的日常行为，无黑灰产属性。"
+    },
+    {
+      "slang_raw": "花式网名",
+      "occurrence_count": 130,
+      "status": "CONFIRMED",
+      "meaning": "花式网名\"指的是具有创意、特殊或花哨风格的网络昵称或微信号，常用于社交媒体或网络平台的个性化标识，有时也指提供此类网名制作的服务或话题。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "属常规社交媒体内容标签与个性化昵称服务描述，未涉及违规账号交易或黑产工具。"
+    },
+    {
+      "slang_raw": "是我的名字首字母",
+      "occurrence_count": 130,
+      "status": "CONFIRMED",
+      "meaning": "用于指出某个字母是某人的名字的首字母，通常前面会有一个字母（如M是我的名字首字母）。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "字面含义明确的日常描述性短语，用于解释命名逻辑，无任何黑灰产关联。"
+    },
+    {
+      "slang_raw": "合集",
+      "occurrence_count": 122,
+      "status": "CONFIRMED",
+      "meaning": "合集",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "平台通用功能词与内容分类标签，指代多篇内容的汇总，与黑灰产无关。"
+    },
+    {
+      "slang_raw": "小众高级感",
+      "occurrence_count": 122,
+      "status": "CONFIRMED",
+      "meaning": "小众高级感",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "常见的审美风格修饰词，用于内容营销和ID推荐，属日常网络流行语。"
+    },
+    {
+      "slang_raw": "安排",
+      "occurrence_count": 122,
+      "status": "CONFIRMED",
+      "meaning": "安排",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "广泛使用的网络互动用语，意为已处理或已搞定，属通用日常交流词汇。"
+    },
+    {
+      "slang_raw": "楚雨悦",
+      "occurrence_count": 122,
+      "status": "CONFIRMED",
+      "meaning": "楚雨悦 是一个示例性的未注册小众高级感微信号ID（或其它平台ID）名称，常在相关社区的标签和话题中出现，用于演示或作为占位符使用。它本身不具特定语义，仅表示一个可供使用的未注册ID。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "仅为示例性人名或ID占位符，无特定行业暗语含义，属普通中文词汇组合。"
+    },
+    {
+      "slang_raw": "桃枥",
+      "occurrence_count": 122,
+      "status": "CONFIRMED",
+      "meaning": "在提供的例句中，'桃枥'作为一个标签或关键词使用，与其他标签如#微信号、#原创id、#英文、#大数据并列出现。由于例句内容高度重复且呈现自动化生成的特征，'桃枥'很可能是被用于 SEO 引流或内容标记的随机关键词/标签，而非具有特定语义的传统黑话。它可能是为了提高某些关键词的搜索权重而被注入到内容中的占位符。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "作SEO引流或内容标记的随机关键词，无黑灰产场景指向性。"
+    },
+    {
+      "slang_raw": "账号出售",
+      "occurrence_count": 122,
+      "status": "CONFIRMED",
+      "meaning": "在网络交易场景中指代账号的买卖行为，常见于抖音、微信等平台。'出号'或'➗号'是'出售账号'的隐晦表达，'账号出售'作为标签或关键词用于标记此类交易帖，通常涉及违规买卖他人账号的行为。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 95,
+      "reason": "明确涉及违规账号买卖交易及询价行为，属于典型的黑灰产账号交易场景。"
+    },
+    {
+      "slang_raw": "原创",
+      "occurrence_count": 122,
+      "status": "CONFIRMED",
+      "meaning": "“原创”是中文中的常规词汇，表示‘自己创作的作品、原始内容’，常用于社交平台标记原创文章或原创视频。它并非特定圈子内部的隐语或黑话，而是一个通用的描述性词语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "通用平台标签及描述词，指代原创或未注册的ID名称，无黑灰产隐晦含义。"
+    },
+    {
+      "slang_raw": "信小网号",
+      "occurrence_count": 112,
+      "status": "CONFIRMED",
+      "meaning": "信小网号是“微信小网号”的谐音或缩写形式，指未注册的小众高级感微信号ID，属于网络社交平台的小众个性化昵称/账号标识。该词通常出现在非正式交易或分享场景中，用于描述可作为微信、王者荣耀、抖音、网易云等平台使用的未注册独特ID。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "实为“微信小号”或“微信号”的笔误/营销话术，属普通账号标识描述，非黑产暗语。"
+    },
+    {
+      "slang_raw": "感微信号",
+      "occurrence_count": 112,
+      "status": "CONFIRMED",
+      "meaning": "“感微信号”可能指具有特定风格或情感色彩的微信号ID，即在微信号设计中融入某种“感觉”或个性化元素，常用于形容未注册、小众高级的微信号ID，但并非广泛认可的黑话术语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "系文本分词错误截取的片段（原句为“高级感微信号”），仅为普通形容词加名词组合，无特殊含义。"
+    },
+    {
+      "slang_raw": "宝宝萌可以当做微",
+      "occurrence_count": 112,
+      "status": "CONFIRMED",
+      "meaning": "这是一个网名/ID命名建议短语，意思是'宝宝萌'这个风格/词汇可以用作微信ID或网名。其中'宝宝萌'是可爱的网络昵称风格，'可以当做微'表示推荐将该词作为微信号使用。该短语常出现在微信号贩卖的营销文案中。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "明显为文本截取错误的碎片化口语，无实际完整语义，更非行业暗语。"
+    },
+    {
+      "slang_raw": "原创圈打水印的署",
+      "occurrence_count": 112,
+      "status": "CONFIRMED",
+      "meaning": "该词实际上是描述一种ID用途/风格的短语，指的是在原创圈中用于给作品打水印的署名/签名ID类型，常见于微信号、抖音ID、王者ID等账号ID的销售广告中，用于吸引需要独特签名风格的用户。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "文本分词截断产生的无意义片段，原意为内容创作者的署名习惯，与黑灰产无关。"
+    },
+    {
+      "slang_raw": "未注册的小众高级",
+      "occurrence_count": 104,
+      "status": "CONFIRMED",
+      "meaning": "网络语境中的黑话，指的是未被他人注册或占用的、小众品味且看起来有档次的ID（identifier）名称。常用于描述微信ID、王者荣耀ID、抖音ID、网易云ID、网名、个性签名等场景中那些稀缺、独特且富有格调的用户名。核心含义是\"未被注册的小众高级感ID\"。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "系营销文案中的普通描述性短语截断，仅用于包装ID稀缺性，非黑产专用暗语。"
+    },
+    {
+      "slang_raw": "真实生活分享计划",
+      "occurrence_count": 86,
+      "status": "CONFIRMED",
+      "meaning": "在短视频平台（如抖音）中，'真实生活分享计划'通常作为话题标签（#真实生活分享计划）使用，表示创作者承诺或计划分享自己真实日常生活的内容主题。但该短语本身表述直白，字面含义清晰，不具备黑话特有的隐晦性或特定圈层暗语特征，更像是常见的内容分类标签，用于吸引关注或引导流量。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "短视频平台常规内容分类话题标签，字面含义直白，无任何黑灰产关联。"
+    },
+    {
+      "slang_raw": "邪修",
+      "occurrence_count": 86,
+      "status": "CONFIRMED",
+      "meaning": "在短视频运营/自媒体圈中，'邪修'指使用非正规、灰色地带的快速涨粉或流量获取方法（类似于'走邪门歪道'的修炼方式）。通常作为话题标签使用，带有调侃或暗示使用非常规手段的意味。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 85,
+      "reason": "自媒体及灰产圈隐喻术语，代指利用漏洞、刷量、机器养号等非常规灰色涨粉/引流手段，符合黑灰产行话特征。"
+    },
+    {
+      "slang_raw": "了么",
+      "occurrence_count": 86,
+      "status": "CONFIRMED",
+      "meaning": "“了么”是“了吗”的口语化简写，是一种常见的疑问句后缀表达方式，用于询问对方是否完成了某事。例句中“都想好要改什么#微信号 了么？”即询问“你都想好要改什么微信号了吗？”。这是正常的口语/网络表达，不涉及任何隐晦或特殊含义。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "常见口语疑问后缀“了吗”的简写，属日常交流用语，与黑灰产完全无关。"
+    },
+    {
+      "slang_raw": "我要上热门",
+      "occurrence_count": 86,
+      "status": "CONFIRMED",
+      "meaning": "我要上热门",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "全网通用的流量诉求类话题标签，字面意思明确，不属于任何黑灰产暗语。"
+    },
+    {
+      "slang_raw": "嵌入式",
+      "occurrence_count": 78,
+      "status": "CONFIRMED",
+      "meaning": "嵌入式（embedded）是一个计算机/电子工程领域的专业技术术语，指将计算机软硬件系统集成到其他设备或产品中的技术，常用于描述嵌入式系统、嵌入式开发、嵌入式软件等。在例句中，它作为微博话题标签使用，出现在电子信息、物联网等技术领域的推广内容中。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "计算机与电子工程领域的标准专业技术术语，语境为高校学科与技术科普标签，无黑灰产关联。"
+    },
+    {
+      "slang_raw": "万粉成长计划",
+      "occurrence_count": 78,
+      "status": "CONFIRMED",
+      "meaning": "万粉成长计划是指社交媒体或内容平台推出的一种运营活动，目标是通过系列福利和教程帮助用户实现粉丝数量达到一万的目标。其中'万粉'指一万粉丝，'成长计划'是平台推出的用户扶持计划。常见于微博、B站、小红书等平台的内容创作者招募活动中。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "社交媒体平台或创作者生态中常见的运营扶持活动名称，属常规互联网营销与内容运营词汇。"
+    },
+    {
+      "slang_raw": "新人粉丝从",
+      "occurrence_count": 78,
+      "status": "CONFIRMED",
+      "meaning": "这是社交媒体（抖音）运营领域中的常见标题格式，指“新人粉丝从[起始数量]粉增长”的话题或教程。'新人'指刚入驻平台的新账号，'粉丝从'引出粉丝增长起点，后接具体数字目标（如0粉➡️千粉）。虽非固定成语，但已成为此类涨粉内容的高频标题前缀。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "短视频平台涨粉教程的常见标题句式前缀，用于引出账号冷启动数据，属内容创作常规描述。"
+    },
+    {
+      "slang_raw": "大学生",
+      "occurrence_count": 78,
+      "status": "CONFIRMED",
+      "meaning": "在提供的例句中，'大学生'作为hashtag标签使用，用于标记目标受众群体。这类用法常见于社交媒体引流场景中，通过添加'大学生'等标签来吸引特定群体的注意力，参与所谓的'万粉成长计划'等福利活动。从内容看，这是一种针对大学生群体的营销引流手段。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "明确的普通人群体/用户画像描述词，符合判断标准中明确排除的“用户画像”类别。"
+    },
+    {
+      "slang_raw": "电子信息",
+      "occurrence_count": 78,
+      "status": "CONFIRMED",
+      "meaning": "「电子信息」是一个标准化的学术/行业术语，指「电子信息工程」或「电子信息技术」领域，通常指电子产品、信息系统、通信技术等相关的学科或产业方向。在例句中，它作为微博话题标签使用，与「嵌入式」「物联网」等技术标签并列，属于常规技术领域分类词，而非网络黑话或特殊隐语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "标准化的高校学科与产业分类术语，语境为技术类内容标签，完全脱离黑灰产场景。"
+    },
+    {
+      "slang_raw": "千粉小博主是怎么",
+      "occurrence_count": 70,
+      "status": "CONFIRMED",
+      "meaning": "用于询问拥有千名粉丝的小型博主（千粉小博主）实现某种目标（如经济自由）的方法或经验的网络用语，常作为疑问句的开头。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "自媒体内容创作的常见疑问句标题开头，用于分享个人成长或合法变现经验，属正常内容生态用语。"
+    },
+    {
+      "slang_raw": "经验分享",
+      "occurrence_count": 70,
+      "status": "CONFIRMED",
+      "meaning": "在社交媒体语境中，'经验分享'常作为话题标签（Hashtag）使用，表示发布者将分享某种经验、技巧或心得的内容。常见于博主、微商等群体标记自己分享赚钱方法、职业技能、生活技巧等内容的主题分类标签。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "全网通用的内容分类标签，指代正常的经验心得分享，无任何黑灰产隐晦含义或替代功能。"
+    },
+    {
+      "slang_raw": "实现梦经济自由的",
+      "occurrence_count": 70,
+      "status": "CONFIRMED",
+      "meaning": "网络用语，指“梦想中的经济自由”或“理想中的财务自由状态”。这里的“梦”并非指睡眠中的梦境，而是指“梦想、理想状态”。“经济自由”则是指不需要为生活必需而工作、能够随心所欲支配时间和金钱的状态。整体含义是“实现了梦想中的经济自由”，即达成了理想化的财务自由目标。常见于小博主、网红分享“如何获得经济自由”的经验内容中。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "网络生活目标与励志类表述，常用于商业/生活方式分享，非黑灰产专用暗语或交易代称。"
+    },
+    {
+      "slang_raw": "搭讪",
+      "occurrence_count": 70,
+      "status": "CONFIRMED",
+      "meaning": "搭讪",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "日常社交与交友领域的通用词汇，语境为正常交友Vlog标签，未涉及骚扰、杀猪盘等黑灰产行为。"
+    },
+    {
+      "slang_raw": "微信交流",
+      "occurrence_count": 70,
+      "status": "CONFIRMED",
+      "meaning": "微信交流",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "字面意为通过微信进行沟通，属通用日常词汇；虽可能伴随私域导流动作，但本身并非黑灰产加密暗语或行话。"
+    },
+    {
+      "slang_raw": "椋椋",
+      "occurrence_count": 70,
+      "status": "CONFIRMED",
+      "meaning": "椋椋1°是一个网络昵称/用户名，'椋'是一种鸟类的名称，'椋椋'是昵称的重叠形式，后缀'1°'可能是该用户的特定标识符。在提供的例句中，它出现在社交媒体的'搭讪'相关话题下，可能是该搭讪视频中被摄对象或网红的用户名。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "普通网络昵称/用户名，无黑灰产关联"
+    },
+    {
+      "slang_raw": "一个",
+      "occurrence_count": 66,
+      "status": "CONFIRMED",
+      "meaning": "一个",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "通用量词/日常用语，虽在运营语境中出现但本身非黑话"
+    },
+    {
+      "slang_raw": "我学会了你学会了",
+      "occurrence_count": 62,
+      "status": "CONFIRMED",
+      "meaning": "我学会了你学会了",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "常见网络互动句式/玩梗话术，非黑灰产专用暗语"
+    },
+    {
+      "slang_raw": "看抖音视频是可以",
+      "occurrence_count": 62,
+      "status": "CONFIRMED",
+      "meaning": "这是一种网络引流/营销话术，指通过观看抖音视频可以直接获取对方的微信号进行私下联系。通常暗示通过短视频平台建立社交关系。结构上故意使用'是可以'的拖沓式表达来制造悬念、吸引注意力和引导加微信的后续行为。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "直白描述性语句片段，属常规引流话术而非行业暗语"
+    },
+    {
+      "slang_raw": "理想型",
+      "occurrence_count": 62,
+      "status": "CONFIRMED",
+      "meaning": "理想型",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "日常交友/情感类通用标签词汇，无黑灰产属性"
+    },
+    {
+      "slang_raw": "大帅哥",
+      "occurrence_count": 62,
+      "status": "CONFIRMED",
+      "meaning": "在社交媒体引流场景中使用的男性称呼/赞美词，通常作为吸引对方注意力的'钩子'，类似'帅哥'的强调说法，用于搭讪或营销话术中。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "社交媒体常见称呼/赞美词，属日常用语范畴"
+    },
+    {
+      "slang_raw": "卷毛",
+      "occurrence_count": 62,
+      "status": "CONFIRMED",
+      "meaning": "卷毛是一个中性的描述性词语，字面意思指卷曲的毛发或卷曲形状的毛发（如卷发）。在这个候选语境中，它被用作昵称或称呼语，指代某个名叫“卷毛”的人或账号。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "外貌特征描述或普通昵称，与黑灰产无关"
+    },
+    {
+      "slang_raw": "追女生",
+      "occurrence_count": 60,
+      "status": "CONFIRMED",
+      "meaning": "“追女生”是一个由动词“追”和名词“女生”组成的日常短语，字面含义为追求女生、撩拨女生。在提供的例句中，它作为抖音等短视频平台的话题标签（#追女生）使用，用于标记与追求女生相关的搞笑、搭讪等内容。该词本身是标准的日常用语，并非网络黑话或特殊隐喻。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "标准日常短语，作为视频话题标签使用，非黑灰产术语"
+    },
+    {
+      "slang_raw": "卖簪",
+      "occurrence_count": 58,
+      "status": "CONFIRMED",
+      "meaning": "在当前例句中，'卖簪'是作为一个@提及的用户名/账号名出现的，结合上下文（账号运营、流量推广、创作者扶持计划等），该账号可能提供社交媒体账号推广、涨粉或流量推送等服务。'簪'在此可能隐含'推送'或'推广'的隐喻含义（取'簪'与'推'的谐音或意象关联），但整体而言更像是营销账号的普通用户名，而非固定黑话。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "仅为特定营销/推广账号的用户名，非广泛使用的黑灰产行话"
+    },
+    {
+      "slang_raw": "熱镀",
+      "occurrence_count": 58,
+      "status": "CONFIRMED",
+      "meaning": "熱镀",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "特定灰产服务账号的ID/昵称，非通用行业暗语或代称"
+    },
+    {
+      "slang_raw": "小助手",
+      "occurrence_count": 58,
+      "status": "CONFIRMED",
+      "meaning": "小助手",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "属于抖音等平台的官方流量扶持标签（如#DOU+小助手），为常规运营话术，无黑灰产隐喻。"
+    },
+    {
+      "slang_raw": "你也能收获",
+      "occurrence_count": 58,
+      "status": "CONFIRMED",
+      "meaning": "在给定的例句中，“你也能收获”出现在账号运营、流量推广的语境下，意为“通过坚持和正确的方法，你也能获得（流量、关注等收益）”。它是一种鼓励性营销话术，暗示用户使用某种服务或方法后能够获得相应的好处。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "典型的自媒体运营励志营销话术，字面含义明确，不涉及任何黑灰产暗语或交易指代。"
+    },
+    {
+      "slang_raw": "用心坚持",
+      "occurrence_count": 58,
+      "status": "CONFIRMED",
+      "meaning": "在内容营销/账号运营场景下的励志口号，意为'用心投入、坚持不懈'，常用于鼓励创作者持续发布内容、积累粉丝。与'找对路子'、'让账号动起来'等营销话术配合使用，属于账号运营培训类文案中的常用套语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "通用鼓励性词汇，在内容创作语境中仅表示持续努力，与黑灰产无关。"
+    },
+    {
+      "slang_raw": "让账号动起来吧",
+      "occurrence_count": 58,
+      "status": "CONFIRMED",
+      "meaning": "这不是黑话，而是字面意思的运营术语组合。'让账号动起来'意思是'让账号变得活跃/提升账号活跃度'，是短视频平台常见的运营营销表达，字面即实际含义，无隐喻或特殊指代。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 97,
+      "reason": "字面意为提升账号活跃度，属常规短视频运营指导用语，无特殊隐晦含义。"
+    },
+    {
+      "slang_raw": "番茄肥牛卷卷",
+      "occurrence_count": 54,
+      "status": "CONFIRMED",
+      "meaning": "该词实际上是社交平台上用户的昵称，由“番茄”“肥牛”“卷卷”三种食物意象组成，未形成特定的黑话含义，仅作为用户标识使用。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "仅为普通用户昵称/ID，由食物意象组合而成，未形成行业代称或暗语。"
+    },
+    {
+      "slang_raw": "万个粉丝的账号到",
+      "occurrence_count": 54,
+      "status": "CONFIRMED",
+      "meaning": "该候选词是一个被截断的句子片段，源自标题'100万点赞就能涨100万个粉丝的账号到底牛在哪里？'的中间部分。'万个粉丝'指大量粉丝（通常指万级数量），'账号到'是'账号到底'的残缺形式。由于该片段本身语义不完整、语法不连贯（缺少主语和完整谓语），且没有形成固定的网络用语含义，因此不是有效的黑话。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "系完整标题的残缺截取片段，仅描述粉丝数量指标，非固定黑话或行话代称。"
+    },
+    {
+      "slang_raw": "费老鼻子劲了",
+      "occurrence_count": 54,
+      "status": "CONFIRMED",
+      "meaning": "费老鼻子劲了是一个北方方言俚语，意思是“花费了很大的力气/精力”，带有夸张色彩，强调付出了很多努力。其中“老鼻子”是北方口语中表示“很多、极大”的程度副词，“劲”指力气、精力。整个短语表达做事耗费了大量精力，但往往隐含结果不佳或事倍功半的意味。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "北方方言俚语，意为花费极大精力，属日常口语表达，与黑灰产场景无任何关联。"
+    },
+    {
+      "slang_raw": "靓女",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "“靓女”是粤语/白话中对年轻漂亮女性的称呼，意为“美女”。这不是网络黑话或特殊隐语，而是一个区域性日常用语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "粤语地区对女性的日常称呼，出现在搞笑剧情类视频中，属常规社交用语。"
+    },
+    {
+      "slang_raw": "可以加个",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "“可以加个”是中文中常见的请求句式，意为“可以添加一个（通常指社交账号，如微信号）吗？”，常用于在网络上向对方索要微信、V等联系方式。它本身是一个正常语句，不属于特殊的黑话或俚语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 96,
+      "reason": "常规社交请求句式，用于索要联系方式，字面意思清晰，不属于黑灰产专用暗语。"
+    },
+    {
+      "slang_raw": "粤语",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "在提供的例句中，“粤语”出现在hashtag话题标签中，用作内容分类标记，表示该视频或帖子内容与粤语（广东方言）相关。这里并非指代某种网络黑话或特殊隐语，而是一个正常的语言/文化标签词。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "纯内容分类标签，标识视频语言属性，为平台常规话题标记，无黑产含义。"
+    },
+    {
+      "slang_raw": "生日同一天的加个",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "生日同一天的加个",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "属于社交媒体常见的直接引流话术，字面意思明确且公开，并非隐晦暗语或行业黑话。"
+    },
+    {
+      "slang_raw": "晚风很温柔",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "这是网络社交平台上的话题标签，属于一种情感化、浪漫化的网络流行表达。用来形容夏天傍晚微风拂面的舒适、惬意感受，带有少女感和文艺气息。通常与其他相似风格的标签（如#甜妹#元气少女）搭配使用，营造轻松、美好的氛围。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "典型的文艺/情感类社交媒体话题标签，用于营造氛围，与黑灰产无任何关联。"
+    },
+    {
+      "slang_raw": "搞笑",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "搞笑",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "通用内容分类标签，指视频风格为幽默娱乐，属日常网络用语，非黑灰产术语。"
+    },
+    {
+      "slang_raw": "夏天的味道",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "在网络语境中，'夏天的味道'常用于表达清新、甜美、充满青春活力的氛围或感觉，类似于'小清新'、'甜蜜'等含义，常见于社交媒体标签中。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "常见的生活/氛围感话题标签，用于描述清新甜美的内容风格，无黑灰产属性。"
+    },
+    {
+      "slang_raw": "三角洲租号",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "三角洲租号",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 85,
+      "reason": "“租号”属于游戏账号租赁灰色产业链常用词，常伴随盗号、绕过实名、外挂共享等黑灰产风险，符合灰产服务特征。"
+    },
+    {
+      "slang_raw": "甜妹",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "指外表或气质甜美可爱的年轻女性，是网络平台上常见的风格标签/话题分类，常用于形容具有可爱、温柔、青春等特质的女生。该词来源于粉丝文化和网络社区，已成为一种通用的网络流行用语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "常见的用户画像/风格标签，用于形容可爱甜美气质，属大众流行语，非黑灰产暗语。"
+    },
+    {
+      "slang_raw": "元气少女",
+      "occurrence_count": 52,
+      "status": "CONFIRMED",
+      "meaning": "元气少女是网络流行语/标签，指充满活力、精神饱满、阳光向上的年轻女性。元气源自日语，指活力、精力。该词常用于社交媒体上作为自我标签或形容他人，表示青春、可爱、积极向上的形象。与'甜妹'等标签常搭配使用。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "源自日语的流行文化标签，用于形容阳光活力的年轻女性形象，属常规社交内容分类。"
+    },
+    {
+      "slang_raw": "内部代下",
+      "occurrence_count": 50,
+      "status": "CONFIRMED",
+      "meaning": "代练下号服务，指帮人完成游戏代练任务",
+      "context_count": 2,
+      "is_slang": true,
+      "confidence": 88,
+      "reason": "游戏及电商黑灰产常用行话，“代下/代练”指违规代打或代下单服务，“内部”暗示利用渠道漏洞或非正规手段，属典型灰产术语。"
+    },
+    {
+      "slang_raw": "全过程",
+      "occurrence_count": 50,
+      "status": "CONFIRMED",
+      "meaning": "“全过程”是一个标准汉语词汇，由“全”（全部、整个）和“过程”（事物发展所经历的阶段）组合而成，意为“从开始到结束的全部过程”。在这个例句语境中，它指的是揭秘盗号刷粉骗局从开始到结束的完整步骤和环节。该词在例句中属于日常普通用词，并非网络黑话或特殊隐语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "标准汉语词汇，意为完整流程，在此处仅作为标题描述性用语，本身不具备黑灰产暗语或行话属性。"
+    },
+    {
+      "slang_raw": "将不能再挂载橱窗",
+      "occurrence_count": 50,
+      "status": "CONFIRMED",
+      "meaning": "抖音平台运营术语，指平台将禁止某些账号（通常指刷分、互关、粉丝异常操作的账号）使用商品橱窗展示功能，是一种平台对违规账号的限制规则。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 92,
+      "reason": "属于平台规则说明与运营公告用语，字面直白描述功能限制结果，非黑灰产群体使用的隐语或代称。"
+    },
+    {
+      "slang_raw": "团购等",
+      "occurrence_count": 50,
+      "status": "CONFIRMED",
+      "meaning": "在抖音运营语境下指抖音平台的团购功能，与橱窗等功能并列，是短视频/直播带货中的电商工具。但“团购”是日常常用词汇，不是网络黑话。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "属于抖音平台标准的电商功能名称，在上下文中指代官方合规挂载工具，非黑灰产暗语。"
+    },
+    {
+      "slang_raw": "反诈骗",
+      "occurrence_count": 50,
+      "status": "CONFIRMED",
+      "meaning": "反诈骗",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "属于公共安全普法与内容分类的通用术语，用于标识反诈科普主题，非黑产内部隐语。"
+    },
+    {
+      "slang_raw": "洞妖",
+      "occurrence_count": 50,
+      "status": "CONFIRMED",
+      "meaning": "洞妖是网络黑话/暗语，在游戏及社交媒体反诈骗内容中常作为标签使用，特指盗号、刷粉等网络诈骗行为或诈骗者本人。相当于“骗子”或“骗局”的隐晦说法，因骗子行为隐蔽如“洞”，狡猾如“妖”，故称“洞妖”。常见作为hashtag #洞妖 出现在反诈科普内容中。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "实为短视频创作者用于反诈科普内容的自定义话题标签(hashtag)，并非黑灰产从业者实际交易或交流使用的行话。"
+    },
+    {
+      "slang_raw": "平台",
+      "occurrence_count": 47,
+      "status": "CONFIRMED",
+      "meaning": "平台",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "属于互联网商业与日常用语中的极高频通用名词，指代服务载体，无特殊黑灰产隐喻或替代含义。"
+    },
+    {
+      "slang_raw": "立案调查",
+      "occurrence_count": 46,
+      "status": "CONFIRMED",
+      "meaning": "“立案调查”是中国行政和司法体系中的标准法律术语，指执法或监管部门对涉嫌违法的行为或事件正式立案并展开调查的程序。在此语境下，它是官方市场监管用语，不属于网络黑话或隐语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "属于国家行政执法与司法程序的标准法律术语，由监管部门对外通报使用，非黑产规避审查的暗语。"
+    },
+    {
+      "slang_raw": "春雷行动",
+      "occurrence_count": 46,
+      "status": "CONFIRMED",
+      "meaning": "指市场监管部门开展的打击网络刷单、刷量增粉等不正当竞争行为的执法专项行动。'春雷'象征雷声般的震慑力和春季行动的时机，该专项行动通常在315消费者权益日前后开展，以雷霆之势打击违法行为。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "系市场监管部门开展的官方专项执法行动名称，属政务公开用语，与黑灰产内部代号无关。"
+    },
+    {
+      "slang_raw": "市场监管在行动",
+      "occurrence_count": 46,
+      "status": "CONFIRMED",
+      "meaning": "该短语是字面含义的组合，指市场监管部门的执法行动。从例句来看，它是微博话题标签（hashtag）'#315市场监管在行动'的组成部分，用于宣传消费者权益日期间的市场监管执法活动。没有隐含的特殊语义，不是网络黑话或隐语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "属于政务新媒体与新闻报道常用的固定宣传标语及话题标签，字面含义明确，无隐晦代指。"
+    },
+    {
+      "slang_raw": "亲子教育",
+      "occurrence_count": 46,
+      "status": "CONFIRMED",
+      "meaning": "亲子教育是一个标准的社会教育领域术语，指父母或家长对子女进行的教育活动，涵盖家庭教育理念、育儿方法、儿童心理发展指导等内容。在提供的例句中，“亲子教育”仅作为普通的话题标签（hashtag）使用，用于标记内容属于亲子教育类别，与任何隐晦黑话无关。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "属于常规的内容分类标签与家庭教育领域标准术语，仅用于标记视频垂直领域，与黑灰产完全无关。"
+    },
+    {
+      "slang_raw": "号以后",
+      "occurrence_count": 46,
+      "status": "CONFIRMED",
+      "meaning": "“号以后”是一个中文时间表达结构，表示‘某一天（通常指日期中的号）之后’的意思，即从某个特定日期开始往后。例如‘4.16号以后’表示‘4月16日之后’。这是一种正常的中文日常用语，并非网络黑话或平台专有用语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "仅为中文日常时间表达结构（如日期之后），语法功能普通，无任何行业特指或黑话特征。"
+    },
+    {
+      "slang_raw": "诈骗",
+      "occurrence_count": 46,
+      "status": "CONFIRMED",
+      "meaning": "诈骗是指以非法占有为目的，用虚构事实或隐瞒真相的方法，骗取公私财物的违法行为。在例句中，'诈骗'作为正常的安全教育标签使用，提醒用户警惕游戏账号出租出借可能导致的诈骗风险。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "属于明确的法律定性词汇与安全教育标签，在此语境中用于风险提示，非黑产从业者使用的黑话或代称。"
+    },
+    {
+      "slang_raw": "哈弗币",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "哈弗币",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "游戏《三角洲行动》内的虚拟货币名称，属特定游戏圈层术语，非黑灰产通用暗语。"
+    },
+    {
+      "slang_raw": "万元被刑拘",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "指因涉及万元级别的违法所得（如网络诈骗、非法交易等）而被刑事拘留的法律后果描述。常见于新闻标题中，警示人们某些行为会因经济数额达到一定程度而触犯刑法。'万元'通常指代具体金额（如1万元、5万元、13万元等），'被刑拘'即'被刑事拘留'。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "新闻报道中描述案件结果的常规法律用语，非黑灰产内部交流使用的暗语。"
+    },
+    {
+      "slang_raw": "贩卖抖音号获利",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "指通过买卖抖音平台账号来获取经济利益的行为，通常涉及非法活动，如账号买卖、养号、诈骗等。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "直白描述违法事实的陈述性短语，缺乏隐晦性，不属于行业代称或暗语。"
+    },
+    {
+      "slang_raw": "部手机",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "‘部手机’是中文中用于计量手机的数量短语，常见结构为数词+‘部手机’，如‘十部手机’表示十台手机。它本身并不是网络黑话或特殊俚语，而是标准的量词搭配。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "标准中文量词搭配，纯日常用语，无任何黑灰产隐喻。"
+    },
+    {
+      "slang_raw": "四男子买",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "这是一个新闻标题的截取片段，描述'四个男子购买(手机)'这一行为。该短语本身是新闻报道中的描述性文字，用于指代一起刑事案件中的行为人及其动作，并非网络黑话或暗语，没有隐晦含义，不属于特定圈子的隐语术语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "新闻标题截取片段，属日常描述性文字，无黑灰产属性。"
+    },
+    {
+      "slang_raw": "会不会成为抖音爆",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "这是“会不会成为抖音爆款”的截断形式，意思是询问某事物（通常指商品、视频、内容等）是否会成为抖音平台上的爆款/热门产品。该表达常见于电商、营销、自媒体等场景，询问某内容是否会在抖音上走红并获得大量流量和销量。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "短视频运营领域的常规提问句式截断，属日常/营销用语。"
+    },
+    {
+      "slang_raw": "我想加帅哥",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "我想加帅哥",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "直白的社交需求表达，虽可能伴随引流行为，但本身是日常用语而非黑话。"
+    },
+    {
+      "slang_raw": "万粉号",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "万粉号是社交媒体行业（尤其是抖音等短视频平台）中的交易黑话，指拥有『万』级粉丝数量（即上万粉丝）的账号。『万粉』指一万粉丝，『号』指账号，整体指代粉丝数量达到一万或以上的待交易账号。常见于抖音账号交易场景。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 95,
+      "reason": "明确指向账号交易市场的规格术语，直接关联账号买卖与流量产业链，符合黑灰产定义。"
+    },
+    {
+      "slang_raw": "黑心耐电网收号骗",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "这是一个网络诈骗相关的术语，指的是通过非法手段收购他人账号（如游戏账号、社交账号等）进行欺骗的行为。通常涉及'电网'相关平台或场景，'黑心耐'是对这种欺骗行为的修饰，形容其性质恶劣。常见于网络诈骗案例的描述和警示。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "防骗警示类视频标题，属公开描述诈骗手法的陈述句，非黑灰产内部流通暗语。"
+    },
+    {
+      "slang_raw": "意义",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "意义",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "普通形容词，仅用于描述微信号命名风格，与黑灰产无关。"
+    },
+    {
+      "slang_raw": "有需要万粉号的吗",
+      "occurrence_count": 44,
+      "status": "CONFIRMED",
+      "meaning": "在抖音账号交易场景中，'万粉号'指拥有超过一万粉丝的抖音账号。'有需要万粉号的吗'是卖家或中介在询问是否有人需要购买此类账号，属于买卖账号领域的黑话。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 95,
+      "reason": "明确指向社交媒体账号买卖需求，属于典型的黑灰产“账号交易”引流话术。"
+    },
+    {
+      "slang_raw": "不要出租出借游戏",
+      "occurrence_count": 42,
+      "status": "CONFIRMED",
+      "meaning": "不要出租出借游戏",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 92,
+      "reason": "属于反诈宣传与日常安全警示用语，系公众教育语境下的完整句子，非黑产内部交流暗语。"
+    },
+    {
+      "slang_raw": "帮手",
+      "occurrence_count": 42,
+      "status": "CONFIRMED",
+      "meaning": "在网游租号灰色产业链的语境下，‘帮手’指帮助未成年人绕过监管限制、违规登录游戏账号的个人或平台，即违规行为的辅助者/帮凶。但在汉语中‘帮手’本身是普通词汇，意为‘帮助做事的人’，无黑话特征。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "为通用汉语名词，在新闻标题中仅作普通语义使用，不具备黑灰产专属代称或隐晦特征。"
+    },
+    {
+      "slang_raw": "未成年",
+      "occurrence_count": 42,
+      "status": "CONFIRMED",
+      "meaning": "指未达到法定成年年龄的人，即未成年人。在例句中作为标签（#未成年）使用，标记与未成年人相关的防诈骗宣传内容，提醒未成年用户注意账号安全，防范租号骗局。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "标准法律/人口学术语及内容标签，用于标识受众群体，完全符合排除标准中的“用户画像/群体描述”。"
+    },
+    {
+      "slang_raw": "#短",
+      "occurrence_count": 42,
+      "status": "CONFIRMED",
+      "meaning": "#短",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "明显为话题标签截断产生的无效片段（原意应为#短视频等），非独立词汇且无实际黑产含义。"
+    },
+    {
+      "slang_raw": "防诈骗",
+      "occurrence_count": 42,
+      "status": "CONFIRMED",
+      "meaning": "防诈骗是“防止诈骗”或“防范诈骗”的简称，是一个标准的汉语词汇组合，属于反诈宣传和网络安全的常用表达。在例句中作为社交媒体标签（#防诈骗）使用，旨在提醒公众警惕网络诈骗行为，尤其是针对未成年人的账号租售等诈骗手法。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "属于官方反诈宣传的标准用语及常见内容标签，用于提高公众警惕，非黑产隐蔽交流的代称。"
+    },
+    {
+      "slang_raw": "要记住",
+      "occurrence_count": 42,
+      "status": "CONFIRMED",
+      "meaning": "这是一个常见的提醒性表达，用于强调需要牢记某个重要信息或警示。例句中用于提醒用户记住'天上不会掉馅饼'这一防骗警示，没有任何特殊的黑话含义，是标准的日常用语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "极常见的日常提醒性口语表达，仅起强调作用，无任何黑灰产特殊指代。"
+    },
+    {
+      "slang_raw": "谁是",
+      "occurrence_count": 38,
+      "status": "CONFIRMED",
+      "meaning": "谁是",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "基础汉语疑问句式，仅用于新闻标题设问，完全不具备黑话属性。"
+    },
+    {
+      "slang_raw": "卖号盛行",
+      "occurrence_count": 38,
+      "status": "CONFIRMED",
+      "meaning": "“卖号盛行”指在网络游戏中，将游戏账号进行交易（如出售、出租）的行为十分普遍，通常与未成年人绕过游戏时长限制或身份验证相关，属于灰色产业链中的一环。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 88,
+      "reason": "属新闻报道中的客观现象描述短语，虽提及“卖号”但为公开媒体表述，非黑产从业者使用的交易暗号或行话。"
+    },
+    {
+      "slang_raw": "出號",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "出號",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 92,
+      "reason": "账号交易圈常用术语（繁体“出号”），直接指代出售/转让账号行为，属于典型的黑灰产交易行话。"
+    },
+    {
+      "slang_raw": "音流量",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "音流量'是'抖音流量'的隐晦说法，指在抖音平台上的播放量或曝光量，常用于网络黑市中表示出售抖音刷流量、增播放量等服务。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "属平台常规数据指标缩写，仅在卖号语境中作账号属性描述，非黑灰产专用暗语。"
+    },
+    {
+      "slang_raw": "出一个",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "网络交易黑话，'出'意为'出售/卖出'，'出一个'即'卖出一个（账号/商品）'，常见于网络黑市交易中指定要出售的账号类型。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "通用交易表述，“出”在二手市场及社交平台泛指出售，非黑灰产专属暗语。"
+    },
+    {
+      "slang_raw": "出物",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "出物是一个网络交易/电商类的黑话，源自'出货'或'出售物品'的变体用法。常见于账号交易、商品转卖等场景，表示'出售'、'转让'或'出货'的意思。在例句中与'出号'、'账号'等标签并列出现，指代与账号交易相关的物品或服务出售行为。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "源自二次元及二手交易圈的通用词汇，泛指转让物品，不具备黑灰产隐蔽性。"
+    },
+    {
+      "slang_raw": "也可以",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "在该语境中，“也可以”指在平台交易之外，提供另一种联系方式或交易方式，通常表示可以通过私信等其他途径进行。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "纯日常连接词，无特殊含义；语境中的规避行为实际体现在“4⃣️❤️”等符号替代上。"
+    },
+    {
+      "slang_raw": "想买的也可以在我",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "想买的也可以在我",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "完整句子片段，属正常口语表达，无任何黑灰产暗语特征。"
+    },
+    {
+      "slang_raw": "有没有出号的",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "黑话，在账号交易（尤其是被封禁账号或违规账号）的灰色产业语境中，指'有账号可以出售/放出'。'出号'即'账号出手/放出'，常用于询问是否有可交易的账号资源。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 75,
+      "reason": "直接指向账号买卖这一明确的黑灰产场景，虽为直白询问句式，但在情报分析中常作为灰产交易引流的典型话术标记。"
+    },
+    {
+      "slang_raw": "抖音大号被封了",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "该短语描述了抖音平台账号被封禁的情况。在例句的上下文中，它出现在账号交易相关的语境里（'找了几个人了'、'有没有出号的'、'带价格来'、'想买的也可以在我评论区上面找#账号出售'），暗示原账号因违规被封后，用户正在寻求购买新账号以继续运营。这可能涉及绕过平台规则的账号交易行为。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "描述平台常规处罚结果的事实陈述，非行业暗语；仅作为卖号背景出现，词义本身无黑灰产属性。"
+    },
+    {
+      "slang_raw": "抖音",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "抖音",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "知名互联网平台官方名称，属绝对通用词，与黑灰产无关联。"
+    },
+    {
+      "slang_raw": "闲置",
+      "occurrence_count": 36,
+      "status": "CONFIRMED",
+      "meaning": "在二手交易或账号转让语境中，'闲置'指代未使用或空闲的账号/物品，常作为标签或关键词使用，表示该商品是闲置的、可转让的，也可理解为'待售'。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "二手交易平台通用标签，泛指未使用或待转卖物品，不具备黑灰产隐蔽性。"
+    },
+    {
+      "slang_raw": "骗局",
+      "occurrence_count": 35,
+      "status": "CONFIRMED",
+      "meaning": "骗局",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "多用于反诈科普、受害者曝光或媒体揭露类内容中，指代诈骗行为本身，并非黑灰产从业者使用的内部暗语。"
+    },
+    {
+      "slang_raw": "加好友",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "在社交平台引流场景中，'加好友'指引导用户通过平台提供的添加好友功能，将陌生人引流至私人联系方式（如微信、QQ等）以便进一步沟通或交易的行为。这是典型的私域引流话术，常配合'加V'、'加个好友'等表述使用。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "通用动作指令，虽常用于引流语境，但字面直白且为平台基础功能，非黑灰产专用暗语。"
+    },
+    {
+      "slang_raw": "如果你也感觉不错",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "这是一个普通的条件句，字面意思是'如果你也觉得好/感觉不错'。虽然它出现在引流营销文案中（引导加V），但短语本身不具备任何黑话特征，它就是日常中文的正常表达，没有特殊隐喻、暗语或专用术语含义。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "日常口语条件句，无任何行业隐喻或黑产指代含义。"
+    },
+    {
+      "slang_raw": "DOU",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "DOU",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "抖音官方推广产品“DOU+”的常见缩写，属正规平台运营术语。"
+    },
+    {
+      "slang_raw": "DOU+",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "DOU+",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "抖音官方付费流量投放工具名称，系平台标准业务词，非黑话。"
+    },
+    {
+      "slang_raw": "#流量",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "#流量",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "互联网通用营销词汇及内容标签，指代曝光数据，非黑灰产代称。"
+    },
+    {
+      "slang_raw": "商行",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "商行",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 97,
+      "reason": "游戏《三角洲行动》内虚拟物品交易系统的专有名词，属游戏圈术语。"
+    },
+    {
+      "slang_raw": "刷到了就是缘分",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "该短语是网络社交平台上常见的引流话术，意思是\"刷到了就是缘分\"，表达一种随缘相遇的意味，常用于引导用户关注、加微信或进行社交互动。通常以标签形式出现，如\"#刷到了就是缘分#\"。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 96,
+      "reason": "社交平台通用互动标签/话术，用于泛娱乐引流，不具备黑产暗语特征。"
+    },
+    {
+      "slang_raw": "欢迎大叔合拍",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "欢迎大叔合拍",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 97,
+      "reason": "针对特定用户群体的常规社交标签，属普通中文表达，无黑产特殊含义。"
+    },
+    {
+      "slang_raw": "感恩遇见",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "一种网络引流话术/黑话，表面上是表达'感激遇到你'的友好态度，实际用于营造'缘分'氛围，是引导用户添加微信好友的营销手段。该词常与'缘分'、'加V'、'欢迎大叔'等标签组合出现在社交平台引流文本中。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 96,
+      "reason": "网络通用情感表达标签，虽被部分营销号滥用，但本质为日常用语，非黑话。"
+    },
+    {
+      "slang_raw": "闲鱼",
+      "occurrence_count": 34,
+      "status": "CONFIRMED",
+      "meaning": "闲鱼",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "阿里旗下二手交易平台官方品牌名，属正规商业实体名称，非黑产行话。"
+    },
+    {
+      "slang_raw": "三角洲商行",
+      "occurrence_count": 32,
+      "status": "CONFIRMED",
+      "meaning": "网络交易平台黑话，指代某个涉及虚拟货币交易、账号租赁等业务的交易场所。在例句中与'哈佛币'、'租号'等关联出现，可能涉及游戏账号交易或虚拟货币兑换等灰色产业。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "仅为特定游戏账号租赁/虚拟币交易店铺的名称（专有名词），并非行业通用暗语或代称。"
+    },
+    {
+      "slang_raw": "玩机技巧",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "指手机等电子设备的使用技巧、操作窍门和功能探索经验。'玩机'即'玩弄机器/手机'的简称，在数码爱好者和普通网民中都属于常见表述，指通过研究探索手机等设备的各种功能、设置和玩法。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "属于数码爱好者常用的内容分类标签和日常用语，与黑灰产无直接关联。"
+    },
+    {
+      "slang_raw": "媒体",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "媒体",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "为常规商业/互联网行业通用词汇，在上下文中仅作为“新媒体运营”等标签的一部分，非黑灰产暗语。"
+    },
+    {
+      "slang_raw": "手机技巧分享",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "“手机技巧分享”是一个常见的话题标签（hashtag），用于标记与手机使用技巧、功能操作方法、玩机心得等相关的内容。在例句中，它与其他标签如“#玩机技巧”并列出现，属于社交平台上通用的内容分类标签，不具备特殊隐含含义或网络黑话/暗号特征。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "社交平台通用的内容分类标签，字面含义明确，无任何黑灰产隐含意义。"
+    },
+    {
+      "slang_raw": "微信号小众独特有",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "该词指代“微信号”中追求“小众、独特、有意义”的属性，常用于社交平台上作为标签或话题，表示分享或讨论独特且富有意义的微信账号。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "仅为社交媒体上关于个人微信号命名审美的普通描述性短语/标签，属日常用语。"
+    },
+    {
+      "slang_raw": "微信好友",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "在提供的例句中，“微信好友”并非特殊黑话/俚语，而是微信平台的普通功能词汇，指微信上的好友关系。这些内容中的“#微信好友”仅为普通标签，实际意图是引导用户添加私人微信（“加V”），属于社交媒体引流行为。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "微信平台的标准功能词汇，虽出现在引流语境中，但词义本身为通用名词，非黑话。"
+    },
+    {
+      "slang_raw": "爱人先爱己",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "“爱人先爱己”是一句常见的自我关爱格言，意指在爱别人之前首先要爱自己，强调自尊和自爱的重要性。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "常见的自我关爱类生活格言/文案，与黑灰产毫无关联。"
+    },
+    {
+      "slang_raw": "年呀",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "年呀",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "仅为日常对话中的时间词缀与语气助词组合，系文本截断或口语化表达，非黑话。"
+    },
+    {
+      "slang_raw": "️⃣",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "️⃣",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "仅为表情符号（Emoji），用于排版或强调数字/价格，不具备任何暗语属性。"
+    },
+    {
+      "slang_raw": "高级",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "在网络社交语境中，‘高级’指追求高档、有格调的微信号或网名风格，表现出一种审美上的优越感追求。如‘微信号改什么比较高级’、‘#高级’等表达，均是在描述希望自己的网名/微信号ID看起来比别人更高档、更有格调。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "形容审美风格或档次的普通形容词，在上下文中仅指代网名/微信号的格调设计，非黑灰产术语。"
+    },
+    {
+      "slang_raw": "微信扩列",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "微信扩列",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 85,
+      "reason": "语境为针对特定年龄段批量添加微信好友，属于典型的私域引流与养号/卖号前置动作。"
+    },
+    {
+      "slang_raw": "报价",
+      "occurrence_count": 30,
+      "status": "CONFIRMED",
+      "meaning": "报价",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "自媒体达人商务合作的常规商业术语，指代广告合作价格，无黑灰产属性。"
+    },
+    {
+      "slang_raw": "粉管",
+      "occurrence_count": 29,
+      "status": "CONFIRMED",
+      "meaning": "粉管",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "语料明确指向牙膏产品（如口腔护理套装）的测评对比，属日常消费品描述。"
+    },
+    {
+      "slang_raw": "在每个有意义的时",
+      "occurrence_count": 28,
+      "status": "CONFIRMED",
+      "meaning": "在每个有意义的时",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "文艺类文案/网名签名，属普通社交表达，与黑灰产无关。"
+    },
+    {
+      "slang_raw": "谁要此号",
+      "occurrence_count": 28,
+      "status": "CONFIRMED",
+      "meaning": "谁要此号",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 95,
+      "reason": "配合“此号出”及“抖音号评估”标签，直接指向账号买卖交易场景。"
+    },
+    {
+      "slang_raw": "多问律师",
+      "occurrence_count": 28,
+      "status": "CONFIRMED",
+      "meaning": "多问律师",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "普法类博主名称或话题标签，语境为账号安全科普，属正常内容创作。"
+    },
+    {
+      "slang_raw": "笔记",
+      "occurrence_count": 27,
+      "status": "CONFIRMED",
+      "meaning": "笔记",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "小红书平台对图文内容的标准称呼，属平台基础内容标签。"
+    },
+    {
+      "slang_raw": "需要热度连西",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "在抖音等短视频平台上使用的黑话/行话，意思是'需要热度、互相关注/互赞'，通常出现在刷量、互赞、买赞等灰产推广文案中，诱导用户互动以提升账号热度。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 90,
+      "reason": "结合“#互赞”“#卖赞”“#推流”等标签，明确为诱导互动、刷量冲热度的灰产推广话术。"
+    },
+    {
+      "slang_raw": "的来",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "在网络广告或垃圾信息中，‘的来’用于表达‘请求添加对方为好友’的意图，常见于互加好友类信息中，类似于‘来加我’的意思。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 75,
+      "reason": "在“互加v”“#互加好友”语境下，作为批量引流话术的结尾指令，常用于灰产养号或私域导流。"
+    },
+    {
+      "slang_raw": "建议",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "建议",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "通用词汇，语境为经验分享与避坑指南，无任何黑灰产关联。"
+    },
+    {
+      "slang_raw": "我醒了给你发消息",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "这是一个日常表达，字面意思是“当对方醒来后会发送消息”。在提供的例句中，它出现在陌生人试图与对方建立信任的场景中，常与“加个V”“喝多了”等表述一起出现，可能用于不正当目的（如诈骗或骚扰），但本身不构成特定的黑话或隐喻，更多是正常语言表达。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "属于日常社交邀约句式，虽常被黑灰产引流脚本借用作为情感铺垫，但本身并非行业暗语或代称。"
+    },
+    {
+      "slang_raw": "互加好友",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "在网络社交语境中，指双方互相添加对方为好友的行为，通常用于表示一种互助关系或请求对方回关的意图。在例句中，‘互加好友’与‘互相帮忙秒回秒通过’搭配，表达了希望双方互相加好友并互相帮助快速响应的意愿。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 80,
+      "reason": "属于常规社交平台互动功能描述与通用社交用语，缺乏黑灰产专属的隐晦性或加密特征。"
+    },
+    {
+      "slang_raw": "颜值赛道",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "在短视频平台上，“颜值赛道”指的是以高颜值、靠脸吸粉为主的內容类别/赛道，强调创作者的外貌优势。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "属于短视频内容运营与商业分析领域的通用分类标签，指代特定创作方向，无黑灰产属性。"
+    },
+    {
+      "slang_raw": "音符",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "“音符”是网络黑话，通常用作“抖音”（Douyin）平台的代称，以规避平台审查或隐蔽交易意图。它常与表情🎵连用，形成“音符🎵账号”等表述，实际指代抖音账号买卖、引流或共创等行为。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 98,
+      "reason": "明确作为“抖音”平台的规避审查代称，高频出现在账号买卖、违规引流等黑灰产交易语境中。"
+    },
+    {
+      "slang_raw": "音符千粉账号",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "指抖音平台（因抖音logo为音符，常被称为“音符”）上拥有约一千粉丝的账号，常用于账号买卖交易。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 95,
+      "reason": "结合平台黑话“音符”，特指黑灰产账号交易市场中的标准化商品规格，属于交易场景专用表述。"
+    },
+    {
+      "slang_raw": "换绑即可绝不找回",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "该黑话常见于抖音（音符）账号买卖的广告中，意为“只要更换绑定信息（即换手机号、邮箱等），卖家就承诺绝不会通过原绑定方式找回账号”。强调交易后卖方不会反悔或重新掌控账号，用以打消买家顾虑，属于非法账号交易的黑话。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 90,
+      "reason": "针对非法账号交易中常见的“原主找回”风险所形成的特定交易承诺话术，具有鲜明的黑市交易属性。"
+    },
+    {
+      "slang_raw": "实名已解",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "在抖音账号买卖交易中，‘实名已解’表示该账号的实名认证已经被原主人解除绑定，不再关联原所有人的身份信息，因此可以安全地进行换绑操作，买家不必担心原主人通过实名信息找回账号。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 92,
+      "reason": "专用于黑灰产账号流转场景，表明账号已完成身份解绑以便二次转卖，是规避平台风控的行话。"
+    },
+    {
+      "slang_raw": "你醒了给我打电话",
+      "occurrence_count": 26,
+      "status": "CONFIRMED",
+      "meaning": "该短语出现在网络引流话术中，常与‘加个V吧’连用，诱导对方在睡醒后主动打电话联系，属于社交工程手段，实际目的是将用户引导至微信等私人平台，可能用于欺诈或色情服务等违法活动。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "与候选词1同理，属于日常沟通句式，仅作为引流诈骗脚本的组成部分，本身不具备黑话特征。"
+    },
+    {
+      "slang_raw": "出抖音号",
+      "occurrence_count": 25,
+      "status": "CONFIRMED",
+      "meaning": "在网络黑话中，'出'等同于'出售'。'出抖音号'即'出售抖音账号'，是抖音账号交易场景中的常用黑话表达。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 80,
+      "reason": "“出”为二手市场通用动词，该短语为直白的商品出售描述，缺乏黑灰产特有的隐晦代称或加密特征。"
+    },
+    {
+      "slang_raw": "投资买账号赚钱到",
+      "occurrence_count": 24,
+      "status": "CONFIRMED",
+      "meaning": "该短语字面意思为“投资买账号赚钱”，在例句中表达对通过投资购买账号进行赚钱这一行为是否可行的询问。常见于网络社区中用户讨论账号交易、赚钱套路等话题时使用。",
+      "context_count": 4,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "属于普通用户关于账号交易可行性的疑问句式与内容标题，用于日常讨论或流量获取，非行业内部行话。"
+    },
+    {
+      "slang_raw": "账号",
+      "occurrence_count": 24,
+      "status": "CONFIRMED",
+      "meaning": "在网络黑市交易中，‘账号’特指可转让的平台用户账户，常见于抖音（音符）等社交媒体的账号买卖信息。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 95,
+      "reason": "在语料中明确用于指代可买卖、换绑、承诺不找回的社交平台账户，直接对应黑灰产“账号交易”场景。"
+    },
+    {
+      "slang_raw": "合作",
+      "occurrence_count": 24,
+      "status": "CONFIRMED",
+      "meaning": "合作",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "语境为自媒体博主接商单/品牌推广的常规商务用语，属平台官方合作机制，非黑灰产暗语。"
+    },
+    {
+      "slang_raw": "互粉",
+      "occurrence_count": 24,
+      "status": "CONFIRMED",
+      "meaning": "互粉",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "属社交媒体常见的涨粉互动方式与日常运营词汇，虽偶被用于刷量但本身是直白描述性词语，非黑灰产专用代称。"
+    },
+    {
+      "slang_raw": "先到先得",
+      "occurrence_count": 24,
+      "status": "CONFIRMED",
+      "meaning": "在例句语境中，‘先到先得’表示先联系、先回复的买家可以优先获得该账号转让的机会，体现了一种按时间顺序分配的原则，常用于限量促销或商品转让场景。",
+      "context_count": 4,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "通用商业促销与交易话术，仅表示分配顺序规则，无任何黑灰产特殊含义或规避审查的属性。"
+    },
+    {
+      "slang_raw": "不行啊",
+      "occurrence_count": 24,
+      "status": "CONFIRMED",
+      "meaning": "“不行啊”是汉语口语中常见的表达，通常用于表示某事无法实现、不起作用或自己无法满足对方的要求，带有一定的无奈或失望语气。",
+      "context_count": 4,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "纯日常口语表达，仅用于抒发无奈或拒绝情绪，不具备任何行业暗语或黑话特征。"
+    },
+    {
+      "slang_raw": "抖音号",
+      "occurrence_count": 24,
+      "status": "CONFIRMED",
+      "meaning": "在网络交易或转让场景中，‘抖音号’指代抖音平台上的账号，尤其是用于买卖、转让的抖音账号。常见于账号交易广告、转让求购等黑话语境。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "为平台官方标准名词及常见内容标签，虽出现在交易帖中但仅为直白指代对象，非黑灰产衍生暗语。"
+    },
+    {
+      "slang_raw": "文案",
+      "occurrence_count": 24,
+      "status": "CONFIRMED",
+      "meaning": "文案",
+      "context_count": 4,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "属内容创作与营销领域的通用词汇，指代文字内容或说明文档，与黑灰产无直接关联。"
+    },
+    {
+      "slang_raw": "蒲公英",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "蒲公英",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "特指小红书官方商业化接单平台（蒲公英），属正规商务/平台工具名称，非黑灰产暗语。"
+    },
+    {
+      "slang_raw": "急需用米",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "急需用米",
+      "context_count": 2,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "属二手交易平台与社交电商中广泛使用的通用甩卖话术，“米”代指钱已是大众网络用语，非黑灰产专属暗语。"
+    },
+    {
+      "slang_raw": "开通",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "开通",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "平台功能激活的标准操作动词，语境均为正规创作者开通权益或功能，无黑灰产特殊含义。"
+    },
+    {
+      "slang_raw": "手机",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "在提供的例句上下文中，'手机'均指代智能移动电话这一日常电子设备，没有特殊黑话含义。例如：'偷拿家长手机进行转账'中的手机就是指家长的移动电话设备。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "日常通用名词，指代智能电话设备，虽在黑产相关语料中出现，但本身无暗语或代称含义。"
+    },
+    {
+      "slang_raw": "分钟",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "‘分钟’是时间单位，表示分钟（minute），在日常语言和文本中用于计量时间的长度。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "基础时间计量单位，属日常用语，在养号等语境中仅表示操作时长，无黑话属性。"
+    },
+    {
+      "slang_raw": "主要还是怎么方便",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "这是一个口语化表达，意思是'最重要的是怎么方便怎么来'，强调在做选择或决定时，把'方便'作为首要或核心的考量因素。整体语气随意、带有建议性质，暗示没有绝对标准，以个人便利为主。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "口语化表达，意为做事以便利为先，属日常交流用语，非黑灰产专用术语。"
+    },
+    {
+      "slang_raw": "九宫格",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "在微博养号教程中，'九宫格'指每天分三个推荐时间段（08:00-09:00、12:00-13:00、19:00-20:00）各发3条原创微博，总计每天发9条微博的格式要求，配合'十五字以上'的字数限制，形成完整的养号发帖规范。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "原为社交媒体常见的排版格式术语，虽在养号教程中被赋予特定发帖频次含义，但本质是平台通用功能词，非黑产专属暗语。"
+    },
+    {
+      "slang_raw": "十五字以上",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "在微博养号教程中，‘十五字以上’特指发帖时内容必须至少包含十五个汉字，用于提高阳光信用和养号效果。它是一种社区内的内容规范要求。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "描述发帖字数要求的普通短语，属平台规则说明用语，无隐喻或黑产代称含义。"
+    },
+    {
+      "slang_raw": "方式",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "在给定的例句中，‘方式’主要用作名词，表示做事的方法或手段。例如在‘用群控云控做海外社媒是最愚蠢的方式！’中，‘方式’指代使用群控云控这一具体方法；在‘用大🎺🐏方式🐏浩’中，‘方式’指代某种操作手法或技巧。但该词本身是日常用语，并非特殊黑话词汇，在例句中并无隐喻或特殊含义。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "基础汉语名词，泛指方法或手段，在讨论群控等技术时仅作普通语法成分，非黑话。"
+    },
+    {
+      "slang_raw": "日常",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "在该例句中，‘日常’被用作社交媒体话题标签（hashtag），如‘#vlog日常’，表示日常生活类的内容。但‘日常’本身是一个标准汉语词汇，指日常生活或日常发生的事情，并非新造黑话。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "标准汉语词汇及常见内容分类标签，指日常生活，与黑灰产场景无直接关联。"
+    },
+    {
+      "slang_raw": "都是一些个人的看",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "都是一些个人的看",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "完整句子的截断片段，属日常主观陈述用语，无任何黑产暗语特征。"
+    },
+    {
+      "slang_raw": "怎么来",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "网络流行语，意思是“怎么方便就怎么来”，表达做事不拘泥于固定方式、随心所欲的态度。常见结构为“怎么X怎么Y”，强调以X为准。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "日常口语表达，强调灵活变通，未衍生出黑灰产领域的特定指代或暗语含义。"
+    },
+    {
+      "slang_raw": "的人不知道",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "这个短语是'XX的人不知道'句式的一部分，表示某群体不了解或不知道某事。在例句中指99%的人不了解平台官方提供的合规安全方式。这不是一个独立的网络黑话，而是常见的中文句式组合。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "常见中文句式组合，用于陈述事实或制造悬念，属通用表达，非黑产行话。"
+    },
+    {
+      "slang_raw": "运营",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "运营",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "通用商务与新媒体行业术语，指账号或内容日常管理，无黑灰产暗语属性。"
+    },
+    {
+      "slang_raw": "海外社媒运营",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "指在海外社交媒体平台（如TikTok、Facebook、Instagram等）上进行内容运营、账号管理、社群营销等工作。这是一个标准的行业术语组合，其中'海外'表示国外的、跨境的，'社媒'是社交媒体的简称，'运营'指日常管理和营销操作。常见于跨境电商、出海营销、新媒体运营等领域。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "标准的跨境营销与新媒体行业名词，指代合法的海外社交平台管理工作。"
+    },
+    {
+      "slang_raw": "海外矩阵管理系统",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "这是一个营销术语/产品名称，指用于批量管理多个海外社交媒体账号（如TikTok、Facebook、Instagram等）的SaaS工具或系统。与'群控'、'云控'等作弊工具对立，被描述为'官方允许的安全合规方式'。从例句上下文看，是推广此类管理工具的软文/广告内容中的关键词。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 90,
+      "reason": "常规SaaS产品类别名称，语料中明确强调其“合规”与“官方允许”属性，非黑产代称。"
+    },
+    {
+      "slang_raw": "合规出海",
+      "occurrence_count": 22,
+      "status": "CONFIRMED",
+      "meaning": "合规出海是指在遵守目标市场法律法规和平台规则的前提下，安全、合法地进行海外业务拓展。在跨境电商、海外社媒运营等领域特指与'群控'、'云控'等违规操作相对的官方认可、合法的运营方式。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "明确的合法商业拓展术语，强调遵守目标市场法规与平台规则，与黑灰产完全对立。"
+    },
+    {
+      "slang_raw": "好了",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "在给定的例句上下文中，未发现‘好了’作为特殊黑话使用的迹象。该词为中文常见组合（‘好’+‘了’的语气组合），在例句中并未出现。若将其视为可能的软性语气词或操作完成提示，‘好了’在一般营销语境中可表达‘已完成/可以了’的含义，但在本例所涉及的群控云控、海外社媒运营等专业场景中并无特殊黑话语义。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "常见日常语气词或完成态助词，在语料中仅作普通表达使用，无特殊黑产指代。"
+    },
+    {
+      "slang_raw": "侧切",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "侧切",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "滑雪装备专业术语（指板型侧向弧度设计），属户外运动领域词汇，与黑灰产毫无关联。"
+    },
+    {
+      "slang_raw": "这些都是作弊器",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "指在社交媒体运营、游戏等领域中使用的第三方作弊工具或作弊软件，通常特指群控、云控等被平台官方明令禁止的自动化工具。在例句中，'作弊器'指的是群控、云控这类用于批量操作海外社交媒体账号的工具，属于官方平台禁止的违规手段。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 85,
+      "reason": "为直接描述性警示短语，用于公开警告违规自动化工具，并非黑灰产内部流通的暗语或行话。"
+    },
+    {
+      "slang_raw": "官方早就为你准备",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "这是一个营销宣传语句，暗示平台官方已经为用户准备了某种安全、合规的解决方案（通常是某种工具或服务），旨在与群控、云控等作弊手段形成对比，引导用户使用所谓的“官方认可”方式。在社交媒体营销语境中常用于推广合规出海工具或矩阵管理系统。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "典型的短视频/图文营销文案钩子话术，用于引导用户点击或咨询，非行业暗语。"
+    },
+    {
+      "slang_raw": "真的会害了你",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "真的会害了你",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 99,
+      "reason": "日常口语化警示表达，仅用于文案情绪渲染与风险提醒，不具备黑话特征。"
+    },
+    {
+      "slang_raw": "只是",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "“只是”在该语境中是标准中文副词/连词，表示限定、轻微转折或引出后文，意为“仅仅是/不过”。在例句中用于强调官方准备的方式很简单，只是“99%的人不知道”而已，是一种常见的说服性话术，属于正常语言表达，不是黑话。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 100,
+      "reason": "标准中文连词/副词，仅起语法限定与转折作用，完全不具备黑灰产代称属性。"
+    },
+    {
+      "slang_raw": "王者荣耀",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "《王者荣耀》是腾讯公司出品的一款5v5多人在线竞技手游（MOBA），在例句中常作为话题标签（#王者荣耀#）出现，用于标记与该游戏相关的内容，包括游戏教学、赛事、搞笑片段、账号交易等各类主题。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 95,
+      "reason": "该词为正规商业游戏名称，在语料中仅作为话题标签使用，属于通用词/内容标签，本身不具备黑灰产暗语属性。"
+    },
+    {
+      "slang_raw": "和平精英租号",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "指在游戏《和平精英》中租借他人账号的行为及相关交易信息。这是游戏中的一种非法账号交易黑话，常用于绕过官方监管进行账号租借服务。语境中通常包含价格（4/h、10🥕等）、交易条件（两小时起租、包夜等）和注意事项（别吞、不被封号等）。",
+      "context_count": 5,
+      "is_slang": true,
+      "confidence": 90,
+      "reason": "明确指向游戏账号非法租借交易场景，包含价格、档期等黑灰产交易要素，符合账号买卖/租号类黑灰产特征。"
+    },
+    {
+      "slang_raw": "网页链接",
+      "occurrence_count": 20,
+      "status": "CONFIRMED",
+      "meaning": "“网页链接”在这些网络帖子中是作为链接占位符使用的标准网络用语，指向网页的URL地址。用户发布内容时用“网页链接”文字来代替真实链接地址，属于正常通用词汇，并非特定社群的黑话或隐语。",
+      "context_count": 5,
+      "is_slang": false,
+      "confidence": 98,
+      "reason": "该词仅为社交平台通用的URL占位符或功能提示词，虽出现在交易/防骗语境中，但本身无隐晦含义，不属于黑灰产暗语。"
+    }
+  ]
+}

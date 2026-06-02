@@ -27,6 +27,7 @@ paddleocr>=2.7.0
 requests>=2.31.0
 
 # Utilities
+emoji>=2.14,<3.0
 pyyaml>=6.0
 python-dateutil>=2.8.0
 
@@ -40,4 +41,8 @@ jieba>=0.42.1
 
 # Crawler helpers (Windows only)
 # 用于 scripts/auto_click_cdp_dialog.py 自动点击 Chrome CDP 授权弹窗
-pywinauto>=0.6.8; sys_platform == "win32"
+pyautogui>=0.9.50; sys_platform == "win32"
+Pillow>=10.0.0; sys_platform == "win32"
+opencv-python>=4.8.0; sys_platform == "win32"
+# mss: 多屏截屏, 修复 pyautogui 在 Windows 多屏下抓副屏的 bug
+mss>=10.0.0; sys_platform == "win32"
