@@ -202,7 +202,7 @@ class MultiCrawlerScheduler:
 
                 logger.info(f"  [{platform.upper()}] Done")
 
-            if self.running:
+            if self.running and loop_interval > 0:
                 logger.info(f"\n[DONE] Cycle #{cycle} complete. Sleeping {loop_interval}s before next cycle...")
                 await asyncio.sleep(loop_interval)
 
@@ -246,8 +246,8 @@ async def main():
     parser = argparse.ArgumentParser(description="Multi-platform crawler scheduler")
     parser.add_argument("--platforms", "-p", default="dy,tieba,ks,wb,xhs",
                         help="Comma-separated platforms to crawl (default: dy,tieba,ks,wb,xhs)")
-    parser.add_argument("--interval", "-i", type=int, default=900,
-                        help="Loop interval in seconds (default: 900 = 15 min)")
+    parser.add_argument("--interval", "-i", type=int, default=0,
+                        help="Loop interval in seconds (default: 0 = no rest between cycles)")
     parser.add_argument("--keywords", "-k", default="",
                         help="Override keywords for all platforms (comma-separated)")
     parser.add_argument("--daemon", "-d", action="store_true",

@@ -37,3 +37,7 @@ pytest-asyncio>=0.21.0
 # Development
 python-dotenv>=1.0.0
 jieba>=0.42.1
+
+# Crawler helpers (Windows only)
+# 用于 scripts/auto_click_cdp_dialog.py 自动点击 Chrome CDP 授权弹窗
+pywinauto>=0.6.8; sys_platform == "win32"
