@@ -70,7 +70,9 @@ class DaemonScheduler:
 
         pg_db = PostgreSQLService.get_instance()
         existing_mappings = {m['slang_raw']: m['meaning'] for m in pg_db.get_all_slang_mappings()}
-        self._slang_learner = SlangLearner(self.config, slang_mappings=existing_mappings)
+        self._slang_learner = SlangLearner(
+            self.config, slang_mappings=existing_mappings, db_service=pg_db
+        )
         logger.info("SlangLearner initialized")
 
     async def stop(self):
@@ -280,6 +282,11 @@ class DaemonScheduler:
                     if confirmed:
                         await self._persist_confirmed_slang(confirmed)
                         logger.info(f"LLM validated {len(confirmed)} new CONFIRMED slang")
+
+                    # 末位淘汰：命中率 < 5% 且出现 ≥ 200 次的 CONFIRMED/STABLE
+                    eliminated = await self._slang_learner.eliminate_weak_slangs()
+                    if eliminated:
+                        logger.info(f"Slang elimination: removed {eliminated} ineffective slangs")
 
                     stats = self._slang_learner.get_candidate_stats()
                     logger.info(f"Slang learning stats: {stats}")

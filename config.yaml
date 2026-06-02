@@ -163,6 +163,12 @@ slang_learning:
   token_control:
     batch_size: 20
     dynamic_threshold_factor: 1.5  # Multiply threshold when token budget low
+  # 淘汰与回测配置 (Elimination and Backtesting)
+  elimination:
+    min_occurrences: 200
+    min_hit_rate: 0.05
+    backtest_threshold: 0.6
+    backtest_timeout_seconds: 0.5
 
 # Auto Evolution Module
 auto_evolution:

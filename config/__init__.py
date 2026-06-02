@@ -98,6 +98,7 @@ class SlangLearningConfig:
     thresholds: Dict[str, int] = field(default_factory=dict)
     reject: Dict[str, Any] = field(default_factory=dict)
     token_control: Dict[str, Any] = field(default_factory=dict)
+    elimination: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

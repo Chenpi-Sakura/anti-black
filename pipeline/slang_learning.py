@@ -2,13 +2,29 @@
 Slang Learning module for AntiBlack pipeline.
 Handles automatic discovery and learning of new slang terms.
 """
+import asyncio
+import atexit
+import concurrent.futures
+import json
 import logging
+import os
+import re
 from typing import Any, Dict, List, Optional, Set
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 from collections import defaultdict
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
+
+
+# Module-level singleton executor for ReDoS-safe regex matching.
+# Reused across all calls to avoid the cost of creating/tearing down a
+# thread pool on every backtest iteration (40+ times per candidate).
+_REDOS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="redos_guard"
+)
+atexit.register(_REDOS_EXECUTOR.shutdown, wait=False)
 
 
 @dataclass
@@ -40,9 +56,13 @@ class SlangLearner:
       OR REJECTED (failed validation after 3 retries, 30-day silence)
     """
 
-    def __init__(self, config: Dict[str, Any], slang_mappings: Dict[str, str] = None):
+    def __init__(self, config: Dict[str, Any], slang_mappings: Dict[str, str] = None,
+                 db_service: Optional[Any] = None):
         self.config = config
         self.slang_mappings = slang_mappings or {}
+        # Optional injected DB service; falls back to PostgreSQLService.get_instance()
+        # at use time so callers that don't pre-wire the dependency still work.
+        self._db_service = db_service
 
         # Get thresholds from config
         slang_config = config.get('slang_learning', {})
@@ -65,6 +85,17 @@ class SlangLearner:
         self.token_control = {
             'batch_size': token_control.get('batch_size', 20),
             'dynamic_threshold_factor': token_control.get('dynamic_threshold_factor', 1.5)
+        }
+
+        # Elimination & backtest thresholds (slang_learning.elimination.*)
+        elim = slang_config.get('elimination', {})
+        self.elimination = {
+            'min_occurrences': elim.get('min_occurrences', 200),
+            'min_hit_rate': elim.get('min_hit_rate', 0.05),
+            'backtest_threshold': elim.get('backtest_threshold', 0.6),
+            # 0.5s per regex match: 40 backtest items => <=20s ceiling.
+            # Bumping this above 1s is unsafe in production.
+            'backtest_timeout_seconds': elim.get('backtest_timeout_seconds', 0.5),
         }
 
         # In-memory candidate storage (in production, persist to DB)
@@ -92,16 +123,30 @@ class SlangLearner:
             db_candidates = db.get_slang_candidates_by_status(SlangStatus.NEW)
             db_candidates.extend(db.get_slang_candidates_by_status(SlangStatus.OBSERVED))
             db_candidates.extend(db.get_slang_candidates_by_status(SlangStatus.LIKELY))
+            # FR-SLANG-03 + 末位淘汰: also load REJECTED with their reject_until
+            # so the silence-period check in _should_skip survives daemon restarts.
+            db_candidates.extend(db.get_slang_candidates_by_status(SlangStatus.REJECTED))
 
             for db_c in db_candidates:
                 word = db_c.get('candidate_word', '')
                 if word and word not in self._candidates:
+                    reject_until_raw = db_c.get('reject_until')
+                    reject_until = None
+                    if reject_until_raw:
+                        if isinstance(reject_until_raw, datetime):
+                            reject_until = reject_until_raw
+                        elif isinstance(reject_until_raw, str):
+                            try:
+                                reject_until = datetime.fromisoformat(reject_until_raw)
+                            except ValueError:
+                                reject_until = None
                     self._candidates[word] = SlangCandidate(
                         word=word,
                         contexts=[],  # Contexts not restored, just state
                         occurrence_count=db_c.get('occurrence_count', 0),
                         status=db_c.get('status', 'NEW'),
                         inference_count=db_c.get('inference_count', 0),
+                        reject_until=reject_until,
                         regex_pattern=db_c.get('regex_pattern'),
                         meaning=db_c.get('meaning'),
                         source_channel=db_c.get('source_channel')
@@ -125,6 +170,7 @@ class SlangLearner:
                 occurrence_count=candidate.occurrence_count,
                 status=candidate.status,
                 inference_count=candidate.inference_count,
+                reject_until=candidate.reject_until,
                 regex_pattern=candidate.regex_pattern,
                 meaning=candidate.meaning,
                 source_channel=candidate.source_channel
@@ -275,6 +321,58 @@ class SlangLearner:
         """Get context around the word - store full original text for LLM validation."""
         return text  # 返回完整原始句子，供后续 LLM 验证使用
 
+    @staticmethod
+    def _is_redos_unsafe(pattern: str) -> bool:
+        """
+        Heuristic ReDoS detector: reject patterns exhibiting classic catastrophic
+        backtracking structure. This is the PRIMARY defense — `concurrent.futures`
+        timeout is a fallback only, because CPython's `_sre` C extension does NOT
+        release the GIL during search, so a worker stuck in `re.search` cannot
+        be interrupted by the main thread's `future.result(timeout=...)`.
+
+        Heuristics (covers the common catastrophic cases):
+        1. Nested quantifier: a quantified group whose body contains a quantifier.
+           e.g. (a+)+  (.*)+  (\w+)*  (a|a)+
+        2. Adjacent quantifiers on the same atom: a++  a**  a+*  a*+
+        3. Quantified alternation: (a|b)+  (foo|bar)*  (a|aa)+
+           Conservative — may flag some safe alternations, but cheap insurance
+           against the LLM emitting overlapping-prefix alternatives.
+        """
+        # 1) Nested quantifier: (...)+ or (...)* where the body has a quantifier
+        if re.search(r'\([^?+*][^()]*[+*][^()]*\)[+*]', pattern):
+            return True
+        # 2) Adjacent quantifiers on the same atom
+        if re.search(r'[+*][+*]', pattern):
+            return True
+        # 3) Quantified alternation: (alt)+
+        if re.search(r'\([^()]*\|[^()]*\)[+*]', pattern):
+            return True
+        return False
+
+    @staticmethod
+    def _safe_regex_search(pattern: str, text: str, timeout: float) -> Optional[re.Match]:
+        """
+        ReDoS-safe regex search. Layers:
+        1. Compile + heuristic ReDoS pattern check (cheap, primary defense).
+        2. Submit to module-level worker pool with timeout (defense in depth,
+           only effective when the C engine yields — see `_is_redos_unsafe`).
+        Returns None on compile error, ReDoS-unsafe pattern, or timeout.
+        """
+        if SlangLearner._is_redos_unsafe(pattern):
+            logger.warning(f"ReDoS-unsafe pattern rejected: {pattern[:80]}")
+            return None
+        try:
+            compiled = re.compile(pattern)
+        except re.error:
+            return None
+        future = _REDOS_EXECUTOR.submit(compiled.search, text)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            return None
+        except re.error:
+            return None
+
     async def _validate_candidate_with_llm(self, candidate: SlangCandidate) -> bool:
         """
         LLM验证候选词（FR-SLANG-03 独立样本原则）：
@@ -282,13 +380,12 @@ class SlangLearner:
         1. 排除触发消息（M1），使用其他独立消息作为正例
         2. 调用 LLM 生成 regex_pattern + test_cases
         3. 测试正例应匹配，负例应不匹配
-        4. 返回验证结果
-        """
-        import os
-        import json
-        import re
-        from openai import AsyncOpenAI
+        4. 在剩余真实语料（held-out backtest set）上做命中率验证
+        5. 返回验证结果
 
+        所有 `re.search` 均走 `_safe_regex_search`，防止大模型返回的灾难性
+        回溯正则卡死事件循环。
+        """
         api_key = os.environ.get("OPENAI_API_KEY")
         api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
         model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
@@ -296,7 +393,7 @@ class SlangLearner:
         if not api_key:
             logger.warning("OPENAI_API_KEY not set, slang LLM validation skipped")
             return False
-            
+
         logger.info(f"[LLM Call] Triggering Slang Validation for candidate: '{candidate.word}'")
 
         # FR-SLANG-03: 独立样本原则 - 排除触发验证的消息
@@ -307,44 +404,42 @@ class SlangLearner:
             if msg_id != trigger_msg_id
         ]
 
-        # 取最多10条独立上下文
+        # 取最后 10 条独立上下文发给 LLM（保留前序做 backtest）
         contexts_sample = independent_contexts[-10:] if independent_contexts else []
 
         if not contexts_sample:
             logger.warning(f"No independent contexts for slang candidate: {candidate.word}")
             return False
 
-        prompt = f"""分析以下黑话候选词的含义，并为其生成在通用场景下的验证规则：
+        # ---- 三段式 Prompt：人设 + 核心防误判 + 对抗性样本 ----
+        prompt = f"""你是一个顶级的【黑产风控情报专家】。你的任务是鉴定给定的词汇是否为黑产（如诈骗引流、刷单作弊、帐号买卖）为了规避平台审查而发明的【专属暗语/代称/行话】。
 
 候选词: {candidate.word}
 
-完整例句（仅供你理解该词的具体含义，切勿将例句中的特定前缀、后缀或无关文本写入正则）：
+真实语料库（供你结合上下文体会其真实意图）：
 {chr(10).join(f"{i+1}. {ctx}" for i, ctx in enumerate(contexts_sample))}
 
-请返回 JSON 格式：
+【核心防误判规则】（必须严格遵守，违者零分）：
+1. 如果该词在语料中仅仅是"被交易的客体"或"正常名词"（如：游戏名"王者荣耀"、App名"微信"、星座名"十二星座"），它绝对不是黑话，is_valid_slang 必须为 false。
+2. 如果该词是常见的日常动词/形容词（如："买卖"、"加好友"），哪怕它出现在违规帖子里，它也不是黑话。黑话必须具备"隐蔽性"或"特定圈子属性"（如："出抖号"、"小国标"、"上岸"）。
+
+【正则与对抗性样本规则】：
+1. 正则 (regex_pattern)：必须精准，既不能硬编码无用的语气词，也不能过度泛化导致误杀正常语句。
+2. 正例 (test_positive_cases)：造 2 个黑产语境的短句，必须能被你的正则匹配。
+3. 对抗性负例 (test_negative_cases)：造 2 个【包含该候选词核心字眼，但语境完全日常、合法】的短句！例如，如果候选词是"种草"，负例必须是"我在阳台种草"，绝不能用"今天天气很好"这种毫无关联的废话。你的正则绝对不能匹配这两个负例！
+
+请严格返回 JSON 格式（不要包含 markdown 代码块标记）：
 {{
-    "refined_word": "如果有截断或多余字符，请提供修正后的准确黑话词汇（否则与候选词一致）",
+    "refined_word": "修正后的黑话词汇本体（若无修正则与候选词一致）",
     "meaning": "该词的含义解释",
     "regex_pattern": "正则表达式模式",
-    "test_positive_cases": ["包含该黑话的其他新造短句1", "包含该黑话的其他新造短句2"],
-    "test_negative_cases": ["不包含该黑话，但字面相似的短句1", "不包含该黑话的正常句2"],
+    "test_positive_cases": ["黑产语境正例1", "黑产语境正例2"],
+    "test_negative_cases": ["含候选词字眼但日常合法的负例1", "含候选词字眼但日常合法的负例2"],
     "is_valid_slang": true/false
-}}
-
-要求：
-- refined_word：如果在上下文中发现给定的候选词截取不完整，或者包含了多余的标点/语气词等，请在这里输出修正后最精炼准确的黑话词汇本体。如果没有问题，就保持与原候选词一致。
-- is_valid_slang：如果该词不是有效的黑话，请设为 false。
-- meaning：请结合提供的完整例句上下文，准确分析该黑话的含义。
-- regex_pattern：**必须是通用匹配模式！** 目标是在任意未知文本中抓取该黑话本身。
-  * ❌ 错误示范：绝对不能包含例句中特有的上下文（如标点符号、特定的开头结尾。切勿写成类似 "^【脚本引流】专业服务[a-z]*$" 的死板规则）。
-  * ✅ 正确示范：如果黑话是"专业服务"，正则应该尽量精简通用，如 "专业服务" 或考虑变体的 "专\s*业\s*服\s*务"。
-- test_positive_cases：**不要直接抄原例句**，请自己造两个包含该黑话的极简短句作为正例，以验证正则的通用性。
-- test_negative_cases：**绝不能包含能够被 regex_pattern 字面匹配到的词汇！**
-  * ⚠️极易犯错警告：正则表达式（Regex）没有语义理解能力，只认字面。如果该黑话本身也是个日常普通词汇（例如"专业服务"），**绝对不要**拿它的日常合法语境来做负例（正则必定会误杀导致测试失败）。
-  * ✅正确做法：负例应该使用字面相似但不同的词汇，或者完全不相关的句子。例如黑话是"专业服务"，负例可以是"他们提供专门服务"或"这支专业团队很厉害"。
-- regex_pattern 必须能正确匹配你生成的正例，且不匹配负例。"""
+}}"""
 
         try:
+            client = AsyncOpenAI(api_key=api_key, base_url=api_base)
             response = await client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
@@ -355,7 +450,6 @@ class SlangLearner:
             result_text = response.choices[0].message.content
 
             # 去除 LLM thinking tags (<think>...</think>)
-            import re
             result_text = re.sub(r'<think>.*?</think>', '', result_text, flags=re.DOTALL).strip()
 
             logger.info(f"LLM raw response for {candidate.word}: {result_text[:500]}")
@@ -365,7 +459,6 @@ class SlangLearner:
             if json_match:
                 result_text = json_match.group(1)
             else:
-                # 尝试找到第一个 { 或 [ 开始的位置
                 json_start = result_text.find('{')
                 if json_start == -1:
                     json_start = result_text.find('[')
@@ -377,8 +470,12 @@ class SlangLearner:
                 result = json.loads(result_text)
             except json.JSONDecodeError as e:
                 logger.error(f"JSON parse failed for {candidate.word}: {e}")
-                # Step 4: 快速降级模式 - regex 仅测试
-                return self._regex_fallback_validate(candidate)
+                return False
+
+            # 短期硬筛：LLM 自报非黑话
+            if not result.get('is_valid_slang', False):
+                logger.info(f"LLM self-reported not-slang: {candidate.word}")
+                return False
 
             # 保存 regex_pattern
             candidate.regex_pattern = result.get('regex_pattern')
@@ -388,39 +485,65 @@ class SlangLearner:
                 logger.info(f"LLM refined candidate word from '{candidate.word}' to '{refined_word}'")
                 candidate.word = refined_word
 
-            # 验证 regex_pattern
+            if not candidate.regex_pattern:
+                logger.warning(f"LLM returned no regex_pattern for {candidate.word}")
+                return False
+
+            # ---- 验证 LLM 自造的正例（应匹配）/负例（应不匹配） ----
             positive_cases = result.get('test_positive_cases', [])
             negative_cases = result.get('test_negative_cases', [])
+            timeout_s = self.elimination['backtest_timeout_seconds']
 
-            # 测试正例应该匹配
             for pos_case in positive_cases:
-                if not re.search(candidate.regex_pattern, pos_case):
+                if self._safe_regex_search(candidate.regex_pattern, pos_case, timeout_s) is None:
                     logger.warning(f"Positive case not matched: {pos_case[:30]}")
-                    # 正例不匹配时降级用 regex_fallback
-                    return self._regex_fallback_validate(candidate)
+                    return False
 
-            # 测试负例不应该匹配
             for neg_case in negative_cases:
-                if re.search(candidate.regex_pattern, neg_case):
+                if self._safe_regex_search(candidate.regex_pattern, neg_case, timeout_s) is not None:
                     logger.warning(f"Negative case matched (should not): {neg_case}")
                     return False
 
-            logger.info(f"LLM validated slang candidate: {candidate.word} -> {candidate.meaning}")
+            logger.info(f"LLM self-test passed for {candidate.word} -> {candidate.meaning}")
 
             # FR-SLANG-04: 释义一致性验证
-            # 检查多条消息中的 meaning 是否一致（核心词相同）
             if len(contexts_sample) >= 2:
                 if not self._check_meaning_consistency(candidate.meaning, contexts_sample):
                     logger.info(f"Meaning inconsistent for {candidate.word}, downgrading to OBSERVED")
                     candidate.status = 'OBSERVED'
                     return False
 
+            # ---- 真实回测：剩余 ~40 条独立上下文 ----
+            # 10 条已发给 LLM；前面留作 held-out backtest 集合
+            backtest_contexts = independent_contexts[:-10] if len(independent_contexts) > 10 else []
+            if backtest_contexts:
+                threshold = self.elimination['backtest_threshold']
+                matched = 0
+                for ctx in backtest_contexts:
+                    m = await asyncio.to_thread(
+                        self._safe_regex_search, candidate.regex_pattern, ctx, timeout_s
+                    )
+                    if m is not None:
+                        matched += 1
+                rate = matched / len(backtest_contexts)
+                if rate < threshold:
+                    logger.warning(
+                        f"Backtest failed for '{candidate.word}': "
+                        f"{matched}/{len(backtest_contexts)} ({rate:.1%}) < {threshold:.0%}. Rejecting."
+                    )
+                    return False
+                logger.info(
+                    f"Backtest passed for '{candidate.word}': "
+                    f"{matched}/{len(backtest_contexts)} ({rate:.1%})"
+                )
+
             return True
 
         except Exception as e:
             logger.error(f"LLM validation failed for {candidate.word}: {e}")
-            # Step 4: 快速降级模式 - regex 仅测试
-            return self._regex_fallback_validate(candidate)
+            # 不再降级到 regex_fallback：按计划彻底删除兜底。
+            # 失败由 validate_pending_candidates 的 retry 计数接管。
+            return False
 
     def _check_meaning_consistency(self, meaning: str, contexts: list[str]) -> bool:
         """
@@ -443,37 +566,6 @@ class SlangLearner:
         # 核心词在 80% 以上的上下文出现，认为一致
         return hit_rate >= 0.8
 
-    def _regex_fallback_validate(self, candidate: SlangCandidate) -> bool:
-        """
-        快速降级验证模式：当 LLM 调用失败时，使用 regex 覆盖度测试
-        """
-        import re
-
-        # 从 contexts 提取正例（所有包含该词的上下文）
-        positive_cases = [text for msg_id, text in candidate.contexts]
-
-        if not positive_cases:
-            return False
-
-        # 简单的通用 regex：包含该词的句子
-        try:
-            pattern = re.compile(candidate.word)
-        except re.error:
-            return False
-
-        # 检查正例是否都匹配（都应该匹配）
-        matched = sum(1 for ctx in positive_cases if pattern.search(ctx))
-        match_rate = matched / len(positive_cases) if positive_cases else 0
-
-        # 80% 以上匹配率认为有效
-        if match_rate >= 0.8:
-            candidate.regex_pattern = candidate.word
-            candidate.meaning = candidate.word  # 降级：无法确定含义时使用原词
-            logger.info(f"Regex fallback validated: {candidate.word} (match_rate={match_rate:.2f})")
-            return True
-
-        return False
-
     async def validate_pending_candidates(self, batch_size: int = 10) -> List[SlangCandidate]:
         """
         批量验证待审核的候选词（LIKELY 状态且达到阈值）
@@ -489,6 +581,7 @@ class SlangLearner:
             if await self._validate_candidate_with_llm(candidate):
                 candidate.status = 'CONFIRMED'
                 self._known_words.add(candidate.word)
+                self._persist_candidate(candidate)
                 confirmed.append(candidate)
                 logger.info(f"CONFIRMED slang: {candidate.word} -> {candidate.meaning}")
             else:
@@ -498,8 +591,67 @@ class SlangLearner:
                     candidate.reject_until = datetime.utcnow() + timedelta(
                         days=self.reject_config['silence_days']
                     )
+                    # 持久化 REJECTED 状态 + reject_until，保证 daemon
+                    # 重启后 _should_skip 仍能识别沉默期。
+                    self._persist_candidate(candidate)
+                    logger.info(
+                        f"REJECTED slang: {candidate.word} (silenced until {candidate.reject_until})"
+                    )
 
         return confirmed
+
+    async def eliminate_weak_slangs(self) -> int:
+        """
+        末位淘汰：把出现次数 ≥min_occurrences 且命中率 <min_hit_rate 的
+        CONFIRMED/STABLE 候选词打入 REJECTED（30 天沉默）+ 硬删 slang_mappings。
+
+        Returns:
+            Number of slangs demoted in this cycle.
+        """
+        db = self._db_service
+        if db is None:
+            from services.database import PostgreSQLService
+            db = PostgreSQLService.get_instance()
+            self._db_service = db
+
+        try:
+            weak = db.evaluate_slang_effectiveness(
+                min_occurrences=self.elimination['min_occurrences'],
+                min_hit_rate=self.elimination['min_hit_rate'],
+            )
+        except Exception as e:
+            logger.error(f"evaluate_slang_effectiveness failed: {e}")
+            return 0
+
+        if not weak:
+            logger.info("No weak slangs to eliminate this cycle.")
+            return 0
+
+        words = [r['candidate_word'] for r in weak]
+        try:
+            db.demote_slangs(words)
+        except Exception as e:
+            logger.error(f"demote_slangs failed for {len(words)} candidates: {e}")
+            return 0
+
+        # 同步本地状态：in-memory 候选词置为 REJECTED + 沉默期，
+        # 保证后续 process_text 的 _should_skip 立刻生效。
+        now = datetime.utcnow()
+        reject_until = now + timedelta(days=self.reject_config['silence_days'])
+        for word in words:
+            if word in self._candidates:
+                cand = self._candidates[word]
+                cand.status = 'REJECTED'
+                cand.reject_until = reject_until
+            # 不再让分类器命中该词
+            self._known_words.discard(word)
+
+        sample = ', '.join(words[:10])
+        logger.info(
+            f"Demoted {len(words)} weak slangs: {sample}"
+            f"{'...' if len(words) > 10 else ''}"
+        )
+        return len(words)
 
     def get_pending_validation(self) -> List[SlangCandidate]:
         """Get candidates that need LLM inference."""

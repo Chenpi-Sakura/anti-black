@@ -6,7 +6,7 @@ Uses 'antiblack' schema for AntiBlack tables.
 import json
 import logging
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor, Json
@@ -347,6 +347,7 @@ class PostgreSQLService:
             (f"CREATE INDEX IF NOT EXISTS idx_clues_source_channel ON {schema}.clues(source_channel)",),
             (f"CREATE INDEX IF NOT EXISTS idx_clues_published_at ON {schema}.clues(published_at)",),
             (f"CREATE INDEX IF NOT EXISTS idx_clues_risk_published ON {schema}.clues(risk_label_level1, published_at DESC)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_slang_mappings ON {schema}.clues USING GIN (slang_mappings)",),
 
             # Feedback indexes
             (f"CREATE INDEX IF NOT EXISTS idx_feedback_clue_id ON {schema}.feedback(clue_id)",),
@@ -679,6 +680,57 @@ class PostgreSQLService:
             cur.execute(sql.SQL("SELECT * FROM {}.slang_candidates WHERE status = %s").format(
                 sql.Identifier(self.schema)), (status_val,))
             return cur.fetchall()
+
+    def evaluate_slang_effectiveness(self, min_occurrences: int = 200, min_hit_rate: float = 0.05) -> List[Dict[str, Any]]:
+        """Evaluate slang hit rate and return ineffective slangs."""
+        with self._get_cursor() as cur:
+            # We select candidates that are CONFIRMED or STABLE, with occurrences >= min_occurrences
+            # Then we count how many clues contain this word in slang_mappings JSONB array.
+            cur.execute(sql.SQL("""
+                WITH TargetSlangs AS (
+                    SELECT candidate_word, occurrence_count
+                    FROM {schema}.slang_candidates
+                    WHERE status IN ('CONFIRMED', 'STABLE') AND occurrence_count >= %s
+                )
+                SELECT
+                    ts.candidate_word,
+                    ts.occurrence_count,
+                    (SELECT COUNT(*) FROM {schema}.clues c WHERE c.slang_mappings @> jsonb_build_array(jsonb_build_object('slang', ts.candidate_word))) as clue_count
+                FROM TargetSlangs ts
+            """).format(schema=sql.Identifier(self.schema)), (min_occurrences,))
+            results = cur.fetchall()
+
+            ineffective = []
+            for row in results:
+                occurrence_count = row['occurrence_count']
+                clue_count = row['clue_count']
+                hit_rate = clue_count / occurrence_count if occurrence_count > 0 else 0
+                if hit_rate < min_hit_rate:
+                    row['hit_rate'] = hit_rate
+                    ineffective.append(row)
+            return ineffective
+
+    def demote_slangs(self, slang_list: List[str], silence_days: int = 30) -> None:
+        """Demote slangs to REJECTED and delete from mappings."""
+        if not slang_list:
+            return
+
+        reject_until = (datetime.utcnow() + timedelta(days=silence_days)).isoformat()
+
+        with self._get_cursor() as cur:
+            placeholders = ','.join(['%s'] * len(slang_list))
+            # 1. Update slang_candidates
+            cur.execute(sql.SQL(f"""
+                UPDATE {self.schema}.slang_candidates
+                SET status = 'REJECTED', reject_until = %s, updated_at = NOW()
+                WHERE candidate_word IN ({placeholders})
+            """), [reject_until] + slang_list)
+
+            # 2. Delete from slang_mappings
+            cur.execute(sql.SQL(f"""
+                DELETE FROM {self.schema}.slang_mappings
+                WHERE slang_raw IN ({placeholders})
+            """), slang_list)
 
     # ========== QueryTask Operations ==========
 
