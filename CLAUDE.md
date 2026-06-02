@@ -96,10 +96,16 @@ Frontend connects via `EventSource` to receive real-time pipeline progress.
 
 The slang learning module (`pipeline/slang_learning.py`) implements:
 
-- **State Machine**: NEW → OBSERVED → LIKELY → CONFIRMED → STABLE
-- **Independent Sample Principle**: When validating LIKELY→CONFIRMED, the trigger message (M1) is excluded; independent samples (M2, M3...) from other messages are used
-- **LLM Validation**: Generates regex_pattern + test_cases, validates with positive/negative examples
-- **Retry Logic**: Max 3 retries, then REJECTED with 30-day silence period
+- **State Machine**: NEW → OBSERVED → LIKELY → CONFIRMED → STABLE (REJECTED + 30-day silence is the terminal state for both validation failure and tail-end elimination)
+- **Independent Sample Principle (FR-SLANG-03)**: When validating LIKELY→CONFIRMED, the trigger message (M1) is excluded; independent samples (M2, M3...) from other messages are used
+- **Three-layer LLM Validation Gate**:
+  1. **LLM self-test**: regex_pattern + 2 positive + 2 adversarial-negative cases (negatives must contain candidate's key characters but in everyday-legal context). Positive cases all match + negative cases all miss.
+  2. **Meaning consistency**: extract core words (2+ chars) from `meaning`; require ≥80% occurrence in 10 contexts_sample
+  3. **60% real backtest**: regex must match ≥60% of ~40 held-out real contexts (independent from LLM sample). This is the *true* weak-regex filter — LLM can pass self-test with crafted positive cases that don't exist in real data.
+- **Retry Logic**: Max 3 retries, then REJECTED with 30-day silence period (`reject_until` timestamp persisted to DB)
+- **Tail-end elimination** (`eliminate_weak_slangs()`): CONFIRMED/STABLE candidates with ≥200 occurrences AND <5% hit rate get demoted to REJECTED + 30-day silence. Hard-deletes `slang_mappings` rows to free AC automaton slots.
+- **Silence-period upstream filter** (`_should_skip` + `process_text`): REJECTED words inside the silence window are silently dropped — no occurrence_count increment, no re-entry into LIKELY queue. Prevents the 30-day resurrection loop.
+- **ReDoS defense** (`_safe_regex_search`): heuristic pattern check (nested quantifiers, adjacent quantifiers, quantified alternation) + module-level 4-worker ThreadPoolExecutor with 0.5s timeout. The heuristic is the primary defense because CPython's `_sre` C extension holds the GIL — `future.result(timeout=...)` cannot interrupt a stuck worker.
 
 ### Data Models
 
