@@ -475,8 +475,6 @@ async def run_daemon():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    from utils.logger import configure_root_logger
+    configure_root_logger()
     asyncio.run(run_daemon())

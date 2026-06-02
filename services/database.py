@@ -732,6 +732,32 @@ class PostgreSQLService:
                 WHERE slang_raw IN ({placeholders})
             """), slang_list)
 
+    def demote_seed_word(self, words: List[str]) -> int:
+        """
+        与 promote_seed_word 对偶：把 status='active' 且 source='learned'
+        的 seed_words 降级为 'degraded'，让 MediaCrawler 停止按这些词
+        拉取新语料。
+
+        重要不变量（业务安全底线，禁止修改时删减）:
+            - source 必须限定为 'learned'。preset 来源（运维手工置入的种子词）
+              一律不动——防止自动化流程意外"降权"人工配置的规则。
+            - status 必须从 'active' 单向转为 'degraded'，不直接清空行（保留
+              历史 weekly_hit_count、effective_clue_ratio 等可观测指标）。
+            - 该方法只接受由 eliminate_weak_slangs 传入的 words 列表，不会
+              误伤当前 CONFIRMED/STABLE 的其他 slang。
+        """
+        if not words:
+            return 0
+        placeholders = ','.join(['%s'] * len(words))
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL(
+                "UPDATE {}.seed_words SET status = %s "
+                "WHERE source = 'learned' AND status = %s "
+                "AND word IN ({})"
+            ).format(sql.Identifier(self.schema), sql.SQL(placeholders)),
+                (SeedWordStatus.DEGRADED.value, SeedWordStatus.ACTIVE.value, *words))
+            return cur.rowcount
+
     # ========== QueryTask Operations ==========
 
     def create_query_task(self, task: QueryTask) -> str:

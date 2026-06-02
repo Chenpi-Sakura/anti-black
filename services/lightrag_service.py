@@ -255,6 +255,34 @@ class LightRAGIntegrator:
             logger.error(f"Failed to insert custom KG: {e}")
             return {"success": False, "error": str(e)}
 
+    async def delete_slang_entity(self, slang_word: str) -> bool:
+        """
+        末位淘汰配套：删除 LightRAG 中已 CONFIRMED 过的黑话节点。
+        链式调用：先删实体 + entities_vdb 向量，再删所有以该实体为端点的边。
+        任何一步失败返回 False（不抛异常，由调用方决定如何处理）。
+        Best-effort 语义：PG 是主存储，PG 提交后 demote 语义已生效；图谱
+        残留节点最坏情况是污染下一个 cycle 的 hybrid 检索，可被后续
+        Reconciliation cron 或下次调用覆盖。
+        """
+        if not self._rag or not self._initialized:
+            logger.warning(f"LightRAG not initialized, skip delete '{slang_word}'")
+            return False
+        try:
+            # 1) 删实体节点 + entities_vdb 向量
+            result = await self._rag.adelete_by_entity(entity_name=slang_word)
+            if result is not None and hasattr(result, 'success') and not result.success:
+                logger.warning(
+                    f"LightRAG delete entity returned non-success for '{slang_word}': "
+                    f"{getattr(result, 'message', '?')}"
+                )
+            # 2) 删所有以该实体为端点的关系边（即使步骤 1 部分成功也跑）
+            await self._rag.adelete_entity_relation(entity_name=slang_word)
+            logger.info(f"LightRAG entity removed: {slang_word}")
+            return True
+        except Exception as e:
+            logger.warning(f"LightRAG delete failed for '{slang_word}': {e}")
+            return False
+
     def get_stats(self) -> Dict[str, int]:
         """Get knowledge graph statistics."""
         if not self._rag or not self._initialized:
@@ -364,6 +392,14 @@ class GraphProcessor:
     ) -> Dict[str, Any]:
         """Query the knowledge graph."""
         return await self.lightrag.query(query, mode, top_k)
+
+    async def delete_slang_entity(self, slang_word: str) -> bool:
+        """
+        Pass-through to LightRAGIntegrator.delete_slang_entity. Kept on
+        GraphProcessor so the slang-learning demote path can call
+        `gp.delete_slang_entity(word)` uniformly with query_graph / insert.
+        """
+        return await self.lightrag.delete_slang_entity(slang_word)
 
     async def get_entity_profile(self, entity_value: str, entity_type: str = None) -> Optional[Dict[str, Any]]:
         """

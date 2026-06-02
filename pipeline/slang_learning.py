@@ -651,6 +651,35 @@ class SlangLearner:
             f"Demoted {len(words)} weak slangs: {sample}"
             f"{'...' if len(words) > 10 else ''}"
         )
+
+        # Seed words 降级（与 promote_seed_word 对偶）。
+        # source='learned' 限定让 preset 词不被误伤。
+        try:
+            seed_n = db.demote_seed_word(words)
+            if seed_n:
+                logger.info(
+                    f"Seed words demoted: {seed_n} learned seeds marked degraded"
+                )
+        except Exception as e:
+            logger.warning(f"demote_seed_word failed for {len(words)} words: {e}")
+
+        # LightRAG 端清理（best-effort）：PG 是主存储，图谱删除失败不阻塞主流程
+        try:
+            from services.lightrag_service import GraphProcessor
+            sync_gp = GraphProcessor(self.config)
+            await sync_gp.initialize()
+            lightrag_removed = 0
+            for word in words:
+                if await sync_gp.delete_slang_entity(word):
+                    lightrag_removed += 1
+            if lightrag_removed:
+                logger.info(
+                    f"LightRAG cleanup: removed {lightrag_removed}/{len(words)} entities"
+                )
+            await sync_gp.finalize()
+        except Exception as e:
+            logger.warning(f"LightRAG cleanup batch failed: {e}")
+
         return len(words)
 
     def get_pending_validation(self) -> List[SlangCandidate]:
