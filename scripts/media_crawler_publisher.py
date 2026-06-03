@@ -32,10 +32,15 @@ class MediaCrawlerPublisher:
         await self._adapter.initialize()
         await self._producer.start()
         self._running = True
-        
+
+        # Safety net: ensure every enabled platform has a cursor row in DB.
+        # Without this, a new platform added to config.yaml would replay all
+        # history on the first poll. Idempotent: existing rows are untouched.
+        await self._ensure_cursor_rows()
+
         interval = self.config.get('media_crawler', {}).get('poll_interval', 900)
         platforms = [p['name'] for p in self.config.get('media_crawler', {}).get('platforms', []) if p.get('enabled', False)]
-        
+
         if not platforms:
             logger.warning("No platforms enabled in configuration.")
             
@@ -60,6 +65,27 @@ class MediaCrawlerPublisher:
         self._running = False
         await self._producer.stop()
         await self._adapter.finalize()
+
+    async def _ensure_cursor_rows(self) -> None:
+        """Ensure every enabled platform has a cursor row in crawler_sync_state. Bootstrap to NOW() if missing."""
+        platforms = [p['name'] for p in self.config.get('media_crawler', {}).get('platforms', []) if p.get('enabled', False)]
+        if not platforms or not self._adapter._db_pool:
+            return
+        try:
+            async with self._adapter._db_pool.acquire() as conn:
+                for p in platforms:
+                    await conn.execute(
+                        """
+                        INSERT INTO media_crawler.public.crawler_sync_state
+                            (platform, last_check_time)
+                        VALUES ($1, NOW())
+                        ON CONFLICT (platform) DO NOTHING
+                        """,
+                        p,
+                    )
+            logger.info(f"Ensured {len(platforms)} cursor rows in DB")
+        except Exception as e:
+            logger.error(f"Failed to ensure cursor rows: {e}")
 
 
 async def main():

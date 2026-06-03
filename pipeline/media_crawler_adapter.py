@@ -49,6 +49,9 @@ class MediaCrawlerAdapter:
         from services.database import PostgreSQLService
         self._pg_db = PostgreSQLService.get_instance()
 
+        # Restore per-platform cursors from DB so restarts don't replay history
+        await self._restore_cursors()
+
         logger.info("MediaCrawler adapter initialized")
 
     async def finalize(self) -> None:
@@ -56,6 +59,45 @@ class MediaCrawlerAdapter:
         if self._db_pool:
             await self._db_pool.close()
             self._db_pool = None
+
+    async def _restore_cursors(self) -> None:
+        """Load per-platform cursors from PG on startup. Missing platforms keep MIN_DATETIME."""
+        if not self._db_pool:
+            return
+        try:
+            async with self._db_pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT platform, last_check_time FROM public.crawler_sync_state"
+                )
+            for r in rows:
+                # asyncpg returns tz-aware datetime for TIMESTAMPTZ
+                self._last_check_time[r['platform']] = r['last_check_time']
+            logger.info(f"Restored {len(rows)} platform cursors from DB")
+        except Exception as e:
+            logger.error(f"Failed to restore cursors (continuing with empty state): {e}")
+
+    async def _save_cursor(self, platform: str, ts: datetime, count: int) -> None:
+        """UPSERT cursor + counters after a poll. Best-effort: failure does not break the poll."""
+        if not self._db_pool:
+            return
+        try:
+            async with self._db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO public.crawler_sync_state
+                        (platform, last_check_time, last_poll_count, total_polled, last_status, updated_at)
+                    VALUES ($1, $2, $3::int, $3::bigint, 'ok', NOW())
+                    ON CONFLICT (platform) DO UPDATE SET
+                        last_check_time = EXCLUDED.last_check_time,
+                        last_poll_count = EXCLUDED.last_poll_count,
+                        total_polled = public.crawler_sync_state.total_polled + EXCLUDED.total_polled,
+                        last_status = 'ok',
+                        updated_at = NOW()
+                    """,
+                    platform, ts, count,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to save cursor for {platform}: {e}")
 
     async def sync_keywords_from_slang_mapping(self) -> List[str]:
         """
@@ -164,7 +206,8 @@ class MediaCrawlerAdapter:
                 rows = await conn.fetch(query, last_ts)
 
                 if rows:
-                    self._last_check_time['douyin'] = datetime.now()
+                    self._last_check_time['douyin'] = datetime.now(timezone.utc)
+                    await self._save_cursor('douyin', datetime.now(timezone.utc), len(rows))
                     logger.info(f"Polled {len(rows)} new Douyin videos (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_douyin_video(row) for row in rows]
@@ -210,7 +253,8 @@ class MediaCrawlerAdapter:
                 rows = await conn.fetch(query, last_ts, last_ts_ms)
 
                 if rows:
-                    self._last_check_time['tieba'] = datetime.now()
+                    self._last_check_time['tieba'] = datetime.now(timezone.utc)
+                    await self._save_cursor('tieba', datetime.now(timezone.utc), len(rows))
                     logger.info(f"Polled {len(rows)} new Tieba posts (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_tieba_post(row) for row in rows]
@@ -319,7 +363,8 @@ class MediaCrawlerAdapter:
                 rows = await conn.fetch(query, last_ts)
 
                 if rows:
-                    self._last_check_time['xhs'] = datetime.now()
+                    self._last_check_time['xhs'] = datetime.now(timezone.utc)
+                    await self._save_cursor('xhs', datetime.now(timezone.utc), len(rows))
                     logger.info(f"Polled {len(rows)} new Xiaohongshu notes (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_xhs_note(row) for row in rows]
@@ -398,7 +443,8 @@ class MediaCrawlerAdapter:
                 rows = await conn.fetch(query, last_ts)
 
                 if rows:
-                    self._last_check_time['ks'] = datetime.now()
+                    self._last_check_time['ks'] = datetime.now(timezone.utc)
+                    await self._save_cursor('ks', datetime.now(timezone.utc), len(rows))
                     logger.info(f"Polled {len(rows)} new Kuaishou videos (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_kuaishou_video(row) for row in rows]
@@ -474,7 +520,8 @@ class MediaCrawlerAdapter:
                 rows = await conn.fetch(query, last_ts)
 
                 if rows:
-                    self._last_check_time['weibo'] = datetime.now()
+                    self._last_check_time['weibo'] = datetime.now(timezone.utc)
+                    await self._save_cursor('weibo', datetime.now(timezone.utc), len(rows))
                     logger.info(f"Polled {len(rows)} new Weibo notes (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_weibo_note(row) for row in rows]
