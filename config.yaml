@@ -153,7 +153,7 @@ slang_learning:
   thresholds:
     new_to_observed: 10      # NEW -> OBSERVED
     observed_to_likely: 20    # OBSERVED -> LIKELY
-    likely_to_confirmed: 20   # LIKELY -> CONFIRMED (lowered for testing)
+    likely_to_confirmed: 50   # LIKELY -> CONFIRMED (raised 20→50 so held-out backtest has 39+ independent contexts)
     stable_count: 500         # CONFIRMED -> STABLE
   # Reject settings
   reject:

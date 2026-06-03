@@ -650,7 +650,7 @@ class SlangLearner:
         # 核心词在 80% 以上的上下文出现，认为一致
         return hit_rate >= 0.8
 
-    async def validate_pending_candidates(self, batch_size: int = 10) -> List[SlangCandidate]:
+    async def validate_pending_candidates(self, batch_size: int = 30) -> List[SlangCandidate]:
         """
         批量验证待审核的候选词（LIKELY 状态且达到阈值）
         """

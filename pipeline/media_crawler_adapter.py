@@ -7,12 +7,25 @@ import asyncio
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import asyncpg
 
 logger = logging.getLogger(__name__)
+
+
+# ByteDance-scoped fallback black-market keywords.
+# Ensures the crawler can find suspicious content even when 0 slangs are
+# CONFIRMED (cold-start scenario). These are the core vocabulary that appears
+# in any 字节系 (Douyin/XHS/Tieba) 黑灰产 context.
+_FALLBACK_BLACK_MARKET_KEYWORDS: List[str] = [
+    "出抖号", "租号", "回收账号", "出号", "加V", "换绑",
+    "微信号", "刷粉", "刷赞", "群控", "抖音号买卖",
+    "接码", "实名认证", "代实名", "解封", "实名",
+    "千粉", "加微",
+]
 
 
 class MediaCrawlerAdapter:
@@ -22,12 +35,19 @@ class MediaCrawlerAdapter:
     Uses SlangMapping (confirmed slang) as采集关键词.
     """
     MIN_DATETIME = datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    KEYWORDS_CACHE_TTL = 300  # 5 minutes; avoids per-poll DB hit
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self._db_pool: Optional[asyncpg.Pool] = None
-        self._last_check_time: Dict[str, datetime] = {}
+        # Cursor is stored as Unix epoch MILLISECONDS (int), matching the
+        # `add_ts` / `last_modify_ts` BIGINT columns in MediaCrawler tables.
+        # This avoids any timezone/precision ambiguity when comparing to add_ts
+        # in SQL. Conversion to/from datetime happens only at the
+        # crawler_sync_state boundary (TIMESTAMPTZ column).
+        self._last_check_time: Dict[str, int] = {}
         self._keywords: List[str] = []
+        self._keywords_loaded_at: float = 0.0
         self._mongo_db = None
 
     async def initialize(self) -> None:
@@ -61,7 +81,11 @@ class MediaCrawlerAdapter:
             self._db_pool = None
 
     async def _restore_cursors(self) -> None:
-        """Load per-platform cursors from PG on startup. Missing platforms keep MIN_DATETIME."""
+        """Load per-platform cursors from PG on startup. Missing platforms default to 0.
+
+        State table column `last_check_time` is TIMESTAMPTZ; we convert to int ms
+        (matching add_ts BIGINT) so SQL WHERE add_ts > $1 comparisons work.
+        """
         if not self._db_pool:
             return
         try:
@@ -70,8 +94,9 @@ class MediaCrawlerAdapter:
                     "SELECT platform, last_check_time FROM public.crawler_sync_state"
                 )
             for r in rows:
-                # asyncpg returns tz-aware datetime for TIMESTAMPTZ
-                self._last_check_time[r['platform']] = r['last_check_time']
+                # Convert TIMESTAMPTZ -> Unix epoch ms (int) to match add_ts type
+                dt = r['last_check_time']
+                self._last_check_time[r['platform']] = int(dt.timestamp() * 1000)
             logger.info(f"Restored {len(rows)} platform cursors from DB")
         except Exception as e:
             logger.error(f"Failed to restore cursors (continuing with empty state): {e}")
@@ -103,7 +128,15 @@ class MediaCrawlerAdapter:
         """
         Sync keywords from SlangMapping (confirmed slang).
         黑话 = 关键词，从PostgreSQL读取已确认的黑话作为采集关键词。
+
+        5-minute TTL cache avoids hitting DB on every poll. Always merges with
+        _FALLBACK_BLACK_MARKET_KEYWORDS so the crawler can find suspicious
+        content even with 0 CONFIRMED slangs (cold-start protection).
         """
+        # TTL cache hit — no DB call
+        if self._keywords and (time.time() - self._keywords_loaded_at) < self.KEYWORDS_CACHE_TTL:
+            return self._keywords
+
         if not self._pg_db:
             self._pg_db = PostgreSQLService.get_instance()
 
@@ -113,21 +146,26 @@ class MediaCrawlerAdapter:
             keywords = [m['slang_raw'] for m in slang_mappings if m.get('slang_raw')]
 
             if keywords:
-                old_keywords = self._keywords
-                self._keywords = keywords
                 logger.info(f"Synced {len(keywords)} keywords from SlangMapping: {keywords[:5]}...")
-                if set(old_keywords) != set(keywords):
-                    logger.info(f"Keywords updated: added {set(keywords) - set(old_keywords)}, removed {set(old_keywords) - set(keywords)}")
             else:
-                # Fallback to default keywords if SlangMapping is empty
-                self._keywords = ['出抖号', '抖音号买卖', '加V', '千粉', '微信号', '加微', '刷粉']
-                logger.warning(f"SlangMapping empty, using default keywords: {self._keywords}")
+                logger.warning(f"SlangMapping empty; relying on FALLBACK keywords only")
 
+            # Always merge with FALLBACK keywords (union, dedup) — cold-start safety net
+            merged = list(dict.fromkeys(keywords + _FALLBACK_BLACK_MARKET_KEYWORDS))
+            old_keywords = self._keywords
+            self._keywords = merged
+            self._keywords_loaded_at = time.time()
+            if set(old_keywords) != set(merged):
+                logger.info(
+                    f"Keywords updated: total={len(merged)} "
+                    f"(CONFIRMED={len(keywords)}, FALLBACK={len(_FALLBACK_BLACK_MARKET_KEYWORDS)})"
+                )
             return self._keywords
         except Exception as e:
             logger.error(f"Failed to sync keywords from SlangMapping: {e}")
-            # Fallback to default keywords
-            self._keywords = ['出抖号', '抖音号买卖', '加V', '千粉', '微信号', '加微', '刷粉']
+            # Last-resort fallback: use FALLBACK list verbatim (no DB required)
+            self._keywords = list(_FALLBACK_BLACK_MARKET_KEYWORDS)
+            self._keywords_loaded_at = time.time()
             return self._keywords
 
     async def poll_new_content(self, platform: str) -> List[Dict[str, Any]]:
@@ -202,12 +240,17 @@ class MediaCrawlerAdapter:
                     LIMIT 100
                 """
 
-                last_ts = self._last_check_time.get('douyin', self.MIN_DATETIME).timestamp()
-                rows = await conn.fetch(query, last_ts)
+                last_ts_ms = self._last_check_time.get('douyin', 0)
+                rows = await conn.fetch(query, last_ts_ms)
 
                 if rows:
-                    self._last_check_time['douyin'] = datetime.now(timezone.utc)
-                    await self._save_cursor('douyin', datetime.now(timezone.utc), len(rows))
+                    # add_ts is BIGINT (Unix ms). Use MAX(add_ts) as cursor,
+                    # NOT datetime.now() — avoids permanently skipping rows
+                    # that arrive between fetch and cursor commit.
+                    max_cursor_ms = max(r['add_ts'] for r in rows)
+                    self._last_check_time['douyin'] = max_cursor_ms
+                    cursor_dt = datetime.fromtimestamp(max_cursor_ms / 1000, tz=timezone.utc)
+                    await self._save_cursor('douyin', cursor_dt, len(rows))
                     logger.info(f"Polled {len(rows)} new Douyin videos (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_douyin_video(row) for row in rows]
@@ -228,9 +271,9 @@ class MediaCrawlerAdapter:
                 keyword_filter_content = self._build_keyword_filter('desc')
                 combined_filter = f"({keyword_filter_title} OR {keyword_filter_content})"
 
-                # last_modify_ts is millisecond timestamp, add_ts is NULL for all records
-                last_ts = self._last_check_time.get('tieba', self.MIN_DATETIME).timestamp()
-                last_ts_ms = last_ts * 1000
+                # last_modify_ts is millisecond timestamp (BIGINT), add_ts is NULL for all records.
+                # Both columns are BIGINT (Unix ms), so cursor is also int ms.
+                last_ts_ms = self._last_check_time.get('tieba', 0)
 
                 query = """
                     SELECT
@@ -246,15 +289,22 @@ class MediaCrawlerAdapter:
                     FROM public.tieba_note
                     WHERE (add_ts IS NOT NULL AND add_ts > $1)
                        OR (add_ts IS NULL AND last_modify_ts > $2)
-                    ORDER BY COALESCE(add_ts, (last_modify_ts / 1000)::timestamp) ASC
+                    ORDER BY COALESCE(add_ts, last_modify_ts) ASC
                     LIMIT 100
                 """
 
-                rows = await conn.fetch(query, last_ts, last_ts_ms)
+                # $1 and $2 are both int ms to match the BIGINT columns
+                rows = await conn.fetch(query, last_ts_ms, last_ts_ms)
 
                 if rows:
-                    self._last_check_time['tieba'] = datetime.now(timezone.utc)
-                    await self._save_cursor('tieba', datetime.now(timezone.utc), len(rows))
+                    # Tieba add_ts is mostly NULL; fall back to last_modify_ts (ms) for cursor.
+                    max_cursor_ms = max(
+                        r['add_ts'] if r['add_ts'] is not None else r['last_modify_ts']
+                        for r in rows
+                    )
+                    self._last_check_time['tieba'] = max_cursor_ms
+                    cursor_dt = datetime.fromtimestamp(max_cursor_ms / 1000, tz=timezone.utc)
+                    await self._save_cursor('tieba', cursor_dt, len(rows))
                     logger.info(f"Polled {len(rows)} new Tieba posts (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_tieba_post(row) for row in rows]
@@ -359,12 +409,14 @@ class MediaCrawlerAdapter:
                     LIMIT 100
                 """
 
-                last_ts = self._last_check_time.get('xhs', self.MIN_DATETIME).timestamp()
-                rows = await conn.fetch(query, last_ts)
+                last_ts_ms = self._last_check_time.get('xhs', 0)
+                rows = await conn.fetch(query, last_ts_ms)
 
                 if rows:
-                    self._last_check_time['xhs'] = datetime.now(timezone.utc)
-                    await self._save_cursor('xhs', datetime.now(timezone.utc), len(rows))
+                    max_cursor_ms = max(r['add_ts'] for r in rows)
+                    self._last_check_time['xhs'] = max_cursor_ms
+                    cursor_dt = datetime.fromtimestamp(max_cursor_ms / 1000, tz=timezone.utc)
+                    await self._save_cursor('xhs', cursor_dt, len(rows))
                     logger.info(f"Polled {len(rows)} new Xiaohongshu notes (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_xhs_note(row) for row in rows]
@@ -439,12 +491,14 @@ class MediaCrawlerAdapter:
                     LIMIT 100
                 """
 
-                last_ts = self._last_check_time.get('ks', self.MIN_DATETIME).timestamp()
-                rows = await conn.fetch(query, last_ts)
+                last_ts_ms = self._last_check_time.get('ks', 0)
+                rows = await conn.fetch(query, last_ts_ms)
 
                 if rows:
-                    self._last_check_time['ks'] = datetime.now(timezone.utc)
-                    await self._save_cursor('ks', datetime.now(timezone.utc), len(rows))
+                    max_cursor_ms = max(r['add_ts'] for r in rows)
+                    self._last_check_time['ks'] = max_cursor_ms
+                    cursor_dt = datetime.fromtimestamp(max_cursor_ms / 1000, tz=timezone.utc)
+                    await self._save_cursor('ks', cursor_dt, len(rows))
                     logger.info(f"Polled {len(rows)} new Kuaishou videos (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_kuaishou_video(row) for row in rows]
@@ -516,12 +570,14 @@ class MediaCrawlerAdapter:
                     LIMIT 100
                 """
 
-                last_ts = self._last_check_time.get('weibo', self.MIN_DATETIME).timestamp()
-                rows = await conn.fetch(query, last_ts)
+                last_ts_ms = self._last_check_time.get('weibo', 0)
+                rows = await conn.fetch(query, last_ts_ms)
 
                 if rows:
-                    self._last_check_time['weibo'] = datetime.now(timezone.utc)
-                    await self._save_cursor('weibo', datetime.now(timezone.utc), len(rows))
+                    max_cursor_ms = max(r['add_ts'] for r in rows)
+                    self._last_check_time['weibo'] = max_cursor_ms
+                    cursor_dt = datetime.fromtimestamp(max_cursor_ms / 1000, tz=timezone.utc)
+                    await self._save_cursor('weibo', cursor_dt, len(rows))
                     logger.info(f"Polled {len(rows)} new Weibo notes (keyword filter: {len(self._keywords)} keywords)")
 
                 return [self._convert_weibo_note(row) for row in rows]
