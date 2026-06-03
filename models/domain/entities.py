@@ -18,6 +18,14 @@ class EntityType(str, Enum):
     SLANG = "SLANG"
     PRICE = "PRICE"
     PLATFORM = "PLATFORM"
+    # === 黑灰产 M.O. & Toolchain 节点 (由 MOExtractor 写入) ===
+    TOOL = "TOOL"           # 黑产工具: 接码平台 / 改机工具 / 群控系统
+    TACTIC = "TACTIC"       # 战术动作: 养号 / 截流 / 爆粉 / 代实名
+    TARGET = "TARGET"       # 攻击目标: 抖音直播间 / 本地生活评论区
+    # === 黑灰产 Supply & Demand 节点 (由 MOExtractor 写入) ===
+    RESOURCE = "RESOURCE"   # 黑产资源: 千粉号 / 实名号 / 蓝V号
+    INTENT = "INTENT"       # 交易意图: 出 / 收 / 寻 / 代办
+    SCENE = "SCENE"         # 应用场景: 无人直播 / 短剧推广
 
 
 class RiskLevel(str, Enum):

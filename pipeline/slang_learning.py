@@ -747,22 +747,10 @@ class SlangLearner:
         except Exception as e:
             logger.warning(f"demote_seed_word failed for {len(words)} words: {e}")
 
-        # LightRAG 端清理（best-effort）：PG 是主存储，图谱删除失败不阻塞主流程
-        try:
-            from services.lightrag_service import GraphProcessor
-            sync_gp = GraphProcessor(self.config)
-            await sync_gp.initialize()
-            lightrag_removed = 0
-            for word in words:
-                if await sync_gp.delete_slang_entity(word):
-                    lightrag_removed += 1
-            if lightrag_removed:
-                logger.info(
-                    f"LightRAG cleanup: removed {lightrag_removed}/{len(words)} entities"
-                )
-            await sync_gp.finalize()
-        except Exception as e:
-            logger.warning(f"LightRAG cleanup batch failed: {e}")
+        # Note (2026-06-03): 取消 LightRAG 清理步骤。
+        # 既然 slang→LightRAG 写入已在 _persist_confirmed_slang 移除，
+        # 淘汰时的图谱清理也不再需要——没有节点要清。消除了 slang-to-slang
+        # 的双向维护链路（写入侧 daemon_scheduler + 清理侧 slang_learning）。
 
         return len(words)
 

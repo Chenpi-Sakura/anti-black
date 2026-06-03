@@ -3,11 +3,31 @@ LightRAG integration for AntiBlack pipeline.
 Handles deep channel processing with knowledge graph construction.
 """
 import os
+import re
+import unicodedata
 import logging
 from typing import Any, Dict, List, Optional
 from functools import partial
 
 logger = logging.getLogger(__name__)
+
+
+# bge-m3 (via Ollama) tends to produce NaN vectors for inputs containing:
+#   - control characters (NUL, BEL, VT, FF, SO/SI, ...)
+#   - BOM / zero-width / RTL/LTR marks
+#   - very long strings near the 8192-token context limit
+# We pre-sanitize AND retry with progressively shorter input on 500.
+_MAX_EMBED_CHARS = 512          # safe length well below 8192 tokens
+_RETRY_TIERS = (256, 128, 64)   # degrade input on each 500 retry
+
+# Control characters that bge-m3 chokes on (excludes \t \n \r which are common
+# whitespace, harmless for embeddings).
+_BAD_CONTROL_CHARS = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
+    r"|[‌-‏⁠﻿]"
+)
+# Collapse any run of whitespace to a single space.
+_WS_COLLAPSE = re.compile(r"\s+")
 
 
 def create_minimax_complete():
@@ -54,6 +74,32 @@ def create_minimax_complete():
     return minimax_complete
 
 
+def _sanitize_for_embed(text: str, max_chars: int = _MAX_EMBED_CHARS) -> str:
+    """Sanitize a single text for bge-m3 / Ollama embedding.
+
+    Strips:
+      - control characters (NUL, BEL, FF, SO/SI, ...)
+      - BOM / zero-width / RTL/LTR marks (separate regex class)
+      - leading/trailing whitespace
+    Collapses internal whitespace and truncates to max_chars.
+    """
+    if not text:
+        return ""
+    s = str(text)
+    s = _BAD_CONTROL_CHARS.sub("", s)
+    s = unicodedata.normalize("NFKC", s)
+    s = _WS_COLLAPSE.sub(" ", s).strip()
+    if len(s) > max_chars:
+        s = s[:max_chars]
+    return s
+
+
+def _looks_like_ollama_500(e: Exception) -> bool:
+    """Detect Ollama 500 'unsupported value: NaN' specifically (vs other 500s)."""
+    msg = str(e)
+    return "NaN" in msg or "unsupported value" in msg or "500" in msg
+
+
 def create_ollama_embed():
     """Create Ollama embedding function (using bge-m3 model)."""
     from openai import AsyncOpenAI
@@ -63,38 +109,59 @@ def create_ollama_embed():
     api_key = os.environ.get("OLLAMA_API_KEY", "ollama")  # Ollama doesn't need real key
     model = os.environ.get("OLLAMA_EMBEDDING_MODEL", "bge-m3:latest")
 
+    async def _call_ollama(client: "AsyncOpenAI", texts: list[str], model_name: str):
+        return await client.embeddings.create(model=model_name, input=texts)
+
     async def ollama_embed(
         texts: list[str],
         model_name: str = model,
         **kwargs,
     ) -> np.ndarray:
-        # bge-m3 tends to produce NaN for inputs shorter than ~2 visible chars
-        # or with only whitespace/control chars. Force a placeholder for those
-        # to keep the vector stable.
-        safe_texts = [
-            t if t and str(t).strip() and len(str(t).strip()) >= 2
-            else "empty_placeholder"
-            for t in texts
-        ]
+        # Step 1: Sanitize each input. bge-m3 produces NaN for control chars,
+        # zero-width marks, BOM, and very long strings near the 8192-token
+        # context limit. Pre-clean and length-cap BEFORE sending.
+        sanitized = [_sanitize_for_embed(t) for t in texts]
+        # Empty / too-short → placeholder (bge-m3 returns 0-vector for these
+        # but we want at least one defined semantic point to anchor retrieval).
+        sanitized = [s if len(s) >= 2 else "empty_placeholder" for s in sanitized]
 
-        logger.info(f"[LLM Call] Triggering Ollama Embedding for {len(texts)} texts (model={model_name})")
-        try:
-            async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
-                response = await client.embeddings.create(
-                    model=model_name,
-                    input=safe_texts
-                )
-                embeddings = [item.embedding for item in response.data]
-                arr = np.array(embeddings)
-                # Defensive: replace any NaN/Inf that slipped through. Ollama
-                # sometimes returns these for edge inputs and the JSON encoder
-                # can fail with 500; even when it succeeds, the 500-fallback
-                # zero path is too coarse.
-                return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-        except Exception as e:
-            logger.error(f"Ollama embedding failed: {e}")
-            # Return zeros on error
-            return np.zeros((len(texts), 1024))
+        logger.info(
+            f"[LLM Call] Triggering Ollama Embedding for {len(texts)} texts (model={model_name})"
+        )
+
+        # Step 2: Try the request. On Ollama 500 "NaN" (which happens when its
+        # Go JSON encoder can't serialize the vector), retry with progressively
+        # shorter input. After all tiers exhausted, return zeros.
+        tiers: list[int] = [_MAX_EMBED_CHARS, *_RETRY_TIERS]
+        async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
+            for attempt, max_chars in enumerate(tiers):
+                if attempt == 0:
+                    payload = sanitized
+                else:
+                    payload = [s[:max_chars] for s in sanitized]
+                    logger.warning(
+                        f"Ollama retry #{attempt} with max_chars={max_chars}"
+                    )
+                try:
+                    response = await _call_ollama(client, payload, model_name)
+                    embeddings = [item.embedding for item in response.data]
+                    arr = np.array(embeddings, dtype=np.float32)
+                    # Defensive: replace any NaN/Inf that slipped through
+                    # (response succeeded but vector contains NaN).
+                    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+                except Exception as e:
+                    if _looks_like_ollama_500(e) and attempt < len(tiers) - 1:
+                        logger.warning(
+                            f"Ollama 500/NaN on attempt {attempt + 1}, "
+                            f"will retry with shorter input: {e}"
+                        )
+                        continue
+                    # Non-retryable, or out of tiers
+                    logger.error(f"Ollama embedding failed: {e}")
+                    return np.zeros((len(texts), 1024), dtype=np.float32)
+
+        # Unreachable — for-loop always returns — but keep for type-checkers
+        return np.zeros((len(texts), 1024), dtype=np.float32)
 
     return ollama_embed
 
@@ -133,25 +200,16 @@ class LightRAGIntegrator:
                 vector_db_kwargs["password"] = pg_config.get('password', 'antiblack123')
                 vector_db_kwargs["database"] = pg_config.get('database', 'antiblack')
 
-            # Build addon_params for Neo4j and other storages
-            addon_params = {
-                "neo4j": {
-                    "uri": neo4j_config.get('uri', 'bolt://localhost:7687'),
-                    "username": neo4j_config.get('username', 'neo4j'),
-                    "password": neo4j_config.get('password', 'neo4j123'),
-                },
-                "pg": {
-                    "host": pg_config.get('host', 'localhost'),
-                    "port": pg_config.get('port', 5432),
-                    "user": pg_config.get('user', 'antiblack'),
-                    "password": pg_config.get('password', 'antiblack123'),
-                    "database": pg_config.get('database', 'antiblack'),
-                }
-            }
-
             # Initialize LightRAG with remote storage backends
             # LLM: MiniMax (OpenAI-compatible)
             # Embedding: Ollama bge-m3 (local)
+            #
+            # Note (2026-06-03): Neo4j connection comes from env vars
+            # NEO4J_URI / NEO4J_USERNAME / NEO4J_PASSWORD (.env) — LightRAG
+            # does NOT read addon_params["neo4j"] (verified in
+            # LightRAG/lightrag/kg/neo4j_impl.py:136-150). PG connection goes
+            # through vector_db_storage_cls_kwargs above (the only place that
+            # actually feeds the PGKVStorage / PGVectorStorage constructors).
             from lightrag.utils import EmbeddingFunc
 
             self._rag = LightRAG(
@@ -167,10 +225,8 @@ class LightRAGIntegrator:
                 vector_storage=storage_config.get('vector', 'PGVectorStorage'),
                 graph_storage=storage_config.get('graph', 'Neo4JStorage'),
                 doc_status_storage=storage_config.get('doc_status', 'PGDocStatusStorage'),
-                # Storage connection kwargs
+                # Storage connection kwargs (this is the only working path for PG)
                 vector_db_storage_cls_kwargs=vector_db_kwargs,
-                # Pass connection info via addon_params
-                addon_params=addon_params,
             )
 
             # Initialize storage backends
@@ -269,25 +325,28 @@ class LightRAGIntegrator:
     async def delete_slang_entity(self, slang_word: str) -> bool:
         """
         末位淘汰配套：删除 LightRAG 中已 CONFIRMED 过的黑话节点。
-        链式调用：先删实体 + entities_vdb 向量，再删所有以该实体为端点的边。
-        任何一步失败返回 False（不抛异常，由调用方决定如何处理）。
+
+        Note (2026-06-03): `adelete_by_entity` 内部已经级联删除
+        实体 + entities_vdb 向量 + 所有以该实体为端点的关系边 +
+        relationships_vdb 向量（见 LightRAG/lightrag/utils/utils_graph.py:66）。
+        因此只调一次 `adelete_by_entity` 即可，**不要**再调
+        `adelete_entity_relation`——那是内部 API（utils_graph.py:138），
+        不是 LightRAG 公开方法（lightrag.py 无此方法）。
+
+        任何失败返回 False（不抛异常，由调用方决定如何处理）。
         Best-effort 语义：PG 是主存储，PG 提交后 demote 语义已生效；图谱
-        残留节点最坏情况是污染下一个 cycle 的 hybrid 检索，可被后续
-        Reconciliation cron 或下次调用覆盖。
+        残留节点最坏情况是污染下一个 cycle 的 hybrid 检索。
         """
         if not self._rag or not self._initialized:
             logger.warning(f"LightRAG not initialized, skip delete '{slang_word}'")
             return False
         try:
-            # 1) 删实体节点 + entities_vdb 向量
             result = await self._rag.adelete_by_entity(entity_name=slang_word)
             if result is not None and hasattr(result, 'success') and not result.success:
                 logger.warning(
                     f"LightRAG delete entity returned non-success for '{slang_word}': "
                     f"{getattr(result, 'message', '?')}"
                 )
-            # 2) 删所有以该实体为端点的关系边（即使步骤 1 部分成功也跑）
-            await self._rag.adelete_entity_relation(entity_name=slang_word)
             logger.info(f"LightRAG entity removed: {slang_word}")
             return True
         except Exception as e:
@@ -330,40 +389,48 @@ class GraphProcessor:
         """
         Process a message through the deep channel.
 
+        New flow (2026-06-03): use MOExtractor for structured 黑灰产 entity/relation
+        extraction, then ainsert_custom_kg injects pre-extracted dict directly into
+        LightRAG Neo4j (same-name nodes MERGE automatically across messages).
+        Falls back to empty extraction on LLM failure (best-effort).
+
         Args:
             message: Message data with:
                 - message_id: Unique message ID
                 - raw_text: Original text
                 - cleaned_text: Cleaned text
                 - classification: Classification result
-                - entities: Extracted entities
+                - entities: Extracted entities (legacy regex-based, kept for compat)
 
         Returns:
-            Processing result with graph relations
+            Processing result with extracted entities/relations
         """
         try:
-            # Build enhanced text with context
-            enhanced_text = self._build_enhanced_text(message)
+            from pipeline.mo_extractor import MOExtractor
 
-            # Insert into knowledge graph
-            success = await self.lightrag.insert(enhanced_text, {
-                "message_id": message.get('message_id'),
-                "source": "deep_channel"
-            })
+            if not hasattr(self, '_mo_extractor') or self._mo_extractor is None:
+                self._mo_extractor = MOExtractor(self.config)
 
-            if success:
-                return {
-                    "success": True,
-                    "message_id": message.get('message_id'),
-                    "entities_inserted": len(message.get('entities', [])),
-                    "graph_relations": []
-                }
-            else:
-                return {
-                    "success": False,
-                    "message_id": message.get('message_id'),
-                    "error": "Failed to insert into graph"
-                }
+            raw_text = message.get('raw_text', '')
+            message_id = message.get('message_id', '')
+
+            # 1) LLM 抽取 M.O. + Supply/Demand 结构化 JSON
+            extraction = await self._mo_extractor.extract(raw_text)
+
+            # 2) 写 LightRAG（同名 entity_name → Neo4j MERGE 自动跨消息聚合）
+            if extraction.get('entities'):
+                kg = self._mo_extractor.to_lightrag_kg(extraction, message_id)
+                await self.lightrag.insert_custom_kg(kg, source='mo_extraction')
+
+            # 3) 写 PG entities 表（供 dedup cron + API 查询）
+            await self._persist_mo_entities(extraction, message)
+
+            return {
+                "success": True,
+                "message_id": message_id,
+                "extracted": len(extraction.get('entities', [])),
+                "relations": len(extraction.get('relationships', [])),
+            }
         except Exception as e:
             logger.error(f"Error processing message through deep channel: {e}")
             return {
@@ -372,28 +439,48 @@ class GraphProcessor:
                 "error": str(e)
             }
 
-    def _build_enhanced_text(self, message: Dict[str, Any]) -> str:
-        """Build enhanced text with context for LightRAG."""
-        parts = []
+    async def _persist_mo_entities(
+        self,
+        extraction: Dict[str, Any],
+        message: Dict[str, Any],
+    ) -> None:
+        """Persist MO-extracted entities to PG `entities` table.
 
-        # Add classification context
-        classification = message.get('classification', {})
-        if classification:
-            parts.append(f"[风险类型: {classification.get('level1_label', '未知')} / {classification.get('level2_label', '未知')}]")
+        Same entity_name + entity_type across messages → upsert_entity merges
+        via ON CONFLICT and increments occurrence_count.
+        """
+        from services.database import PostgreSQLService
+        from models import Entity
+        from models.domain.entities import EntityType
 
-        # Add known entities
-        entities = message.get('entities', [])
-        if entities:
-            entity_strs = []
-            for ent in entities:
-                entity_strs.append(f"{ent.get('entity_type', 'UNKNOWN')}:{ent.get('entity_value', '')}")
-            if entity_strs:
-                parts.append(f"[已知实体: {', '.join(entity_strs)}]")
+        try:
+            pg_db = PostgreSQLService.get_instance()
+        except Exception as e:
+            logger.warning(f"PG not available for MO entity persist: {e}")
+            return
 
-        # Add original text
-        parts.append(f"原文: {message.get('raw_text', '')}")
-
-        return ' '.join(parts)
+        # 写 entities 表（不写 message_refs，避免污染现有 schema 等下游）
+        from pipeline.mo_extractor import MOExtractor
+        records = self._mo_extractor.to_pg_entity_records(
+            extraction,
+            message_id=message.get('message_id', ''),
+            source_channel=message.get('source_channel'),
+        )
+        for rec in records:
+            try:
+                entity = Entity(
+                    entity_id=rec['entity_id'],
+                    entity_type=EntityType(rec['entity_type']),
+                    raw_value=rec['raw_value'],
+                    normalized_value=rec.get('normalized_value', rec['raw_value']),
+                    occurrence_count=rec.get('occurrence_count', 1),
+                    source_channel=rec.get('source_channel'),
+                    risk_labels=rec.get('risk_labels', []),
+                    metadata=rec.get('metadata', {}),
+                )
+                pg_db.upsert_entity(entity)
+            except Exception as e:
+                logger.warning(f"upsert_entity failed for {rec.get('raw_value')}: {e}")
 
     async def query_graph(
         self,

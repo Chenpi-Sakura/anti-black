@@ -326,21 +326,15 @@ class DaemonScheduler:
             pg_db.upsert_slang_mapping(db_mapping)
             logger.info(f"Persisted slang: {candidate.word} -> {candidate.meaning}")
 
-            # FR-SLANG-06: LightRAG structured insert
-            try:
-                from services.lightrag_service import GraphProcessor
-                sync_gp = GraphProcessor(self.config)
-                await sync_gp.initialize()
-                rag_text = f"""黑话: {candidate.word}
-释义: {candidate.meaning}
-正则: {candidate.regex_pattern}
-来源: slang_learning
-渠道: {candidate.source_channel}"""
-                await sync_gp.lightrag.insert_custom_kg(rag_text, source='slang_learning')
-                await sync_gp.finalize()
-                logger.info(f"LightRAG sync: {candidate.word}")
-            except Exception as e:
-                logger.warning(f"LightRAG sync failed for {candidate.word}: {e}")
+            # Note (2026-06-03): 取消 FR-SLANG-06 旧的 LightRAG 写入。
+            # 原方案对每个 CONFIRMED slang 调 insert_custom_kg 写一段 4 行
+            # "黑话/释义/正则/来源" 自包含文本，但实际只产生孤立 slang
+            # 节点（无上下文关联、无共现边），且 PG `slang_mappings` 表 +
+            # GIN 索引已提供完整 hybrid 检索能力。LightRAG 此前的价值仅剩
+            # "防止 REJECTED 词污染 hybrid 检索"，该需求可由查询阶段
+            # `JOIN slang_mappings WHERE status='CONFIRMED'` 替代。
+            # 收益：省 1 LLM call/CONFIRMED + Neo4j 写；消除 slang→LightRAG
+            # 双向维护链路。
 
             # FR-COL-11: Promote to seed word using 7-day frequency (not historical total count)
             try:
