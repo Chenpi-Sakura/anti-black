@@ -68,9 +68,15 @@ def create_ollama_embed():
         model_name: str = model,
         **kwargs,
     ) -> np.ndarray:
-        # Prevent empty strings from causing NaN in Ollama's bge-m3 model
-        safe_texts = [t if t and str(t).strip() else "empty_placeholder" for t in texts]
-        
+        # bge-m3 tends to produce NaN for inputs shorter than ~2 visible chars
+        # or with only whitespace/control chars. Force a placeholder for those
+        # to keep the vector stable.
+        safe_texts = [
+            t if t and str(t).strip() and len(str(t).strip()) >= 2
+            else "empty_placeholder"
+            for t in texts
+        ]
+
         logger.info(f"[LLM Call] Triggering Ollama Embedding for {len(texts)} texts (model={model_name})")
         try:
             async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
@@ -79,7 +85,12 @@ def create_ollama_embed():
                     input=safe_texts
                 )
                 embeddings = [item.embedding for item in response.data]
-                return np.array(embeddings)
+                arr = np.array(embeddings)
+                # Defensive: replace any NaN/Inf that slipped through. Ollama
+                # sometimes returns these for edge inputs and the JSON encoder
+                # can fail with 500; even when it succeeds, the 500-fallback
+                # zero path is too coarse.
+                return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
         except Exception as e:
             logger.error(f"Ollama embedding failed: {e}")
             # Return zeros on error

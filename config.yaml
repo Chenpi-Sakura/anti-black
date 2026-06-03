@@ -309,7 +309,7 @@ media_crawler:
         - "千粉"
         - "微信号"
       enabled: true
-    - name: "baidu_tieba"
+    - name: "tieba"
       keywords:
         - "出抖号"
         - "抖音号买卖"
