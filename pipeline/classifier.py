@@ -155,6 +155,34 @@ class Classifier:
         self._embedding_le = None
         self._load_embedding_model()
 
+    # Standard level1 labels (single source of truth)
+    LEVEL1_LABELS = ('账号交易', '流量作弊', '诈骗引流', '黑产工具', '未知/其他')
+
+    @staticmethod
+    def _normalize_level1_label(label: str) -> str:
+        """Map any dirty variant of a level1 label to its canonical form.
+
+        Handles LLM-side pollution like '账号交易 (Account Trading)' or
+        'Unknown/Other' that previously leaked into the clues table and
+        bloated the LabelEncoder's class space.
+        """
+        if not label:
+            return '未知/其他'
+        stripped = label.strip()
+        if '账号交易' in stripped or 'Account Trading' in stripped:
+            return '账号交易'
+        if '流量作弊' in stripped or 'Traffic Cheating' in stripped:
+            return '流量作弊'
+        if '诈骗引流' in stripped or 'Fraud Leads' in stripped:
+            return '诈骗引流'
+        if '黑产工具' in stripped or 'Black-market Tools' in stripped:
+            return '黑产工具'
+        if 'Unknown' in stripped or '未分类' in stripped or stripped == '其他':
+            return '未知/其他'
+        if stripped in Classifier.LEVEL1_LABELS:
+            return stripped
+        return '未知/其他'
+
     def _load_embedding_model(self):
         """Load trained sklearn classifier for embedding-based classification."""
         import os
@@ -204,19 +232,19 @@ class Classifier:
         result = self._classify_by_rules(text)
         if result and result.confidence >= self.rule_threshold:
             logger.debug(f"Rule classification: {result.level1_label}/{result.level2_label}")
-            return result
+            return self._normalize_result(result)
 
         # Stage 2: Embedding model (simplified for demo)
         result = self._classify_by_embedding(text, context)
         if result and result.confidence >= self.embedding_threshold:
             logger.debug(f"Embedding classification: {result.level1_label}/{result.level2_label}")
-            return result
+            return self._normalize_result(result)
 
         # Stage 3: LLM fallback (return unknown if LLM not available)
         result = self._classify_by_llm(text, context)
         if result:
             logger.debug(f"LLM classification: {result.level1_label}/{result.level2_label}")
-            return result
+            return self._normalize_result(result)
 
         # Default to unknown
         return ClassificationResult(
@@ -225,6 +253,18 @@ class Classifier:
             confidence=0.5,
             source='rule',
             reason='未匹配到明确风险类型'
+        )
+
+    def _normalize_result(self, result: ClassificationResult) -> ClassificationResult:
+        """Return a new ClassificationResult with a canonical level1 label."""
+        if result.level1_label in self.LEVEL1_LABELS:
+            return result
+        return ClassificationResult(
+            level1_label=self._normalize_level1_label(result.level1_label),
+            level2_label=result.level2_label or "未分类",
+            confidence=result.confidence,
+            source=result.source,
+            reason=result.reason,
         )
 
     def _classify_by_rules(self, text: str) -> Optional[ClassificationResult]:
@@ -353,16 +393,29 @@ class Classifier:
                 return [None] * len(texts)
 
             results: List[Optional[ClassificationResult]] = []
+            # Phase 2 open-set: use reject/margin thresholds to flag low-confidence
+            # predictions so the caller can fall back to LLM even if the raw
+            # embedding confidence is above embedding_threshold.
+            reject_thresh = self.config.get('classification', {}).get('embedding_reject_threshold', 0.45)
+            margin_thresh = self.config.get('classification', {}).get('embedding_margin_threshold', 0.12)
             for i in range(len(texts)):
                 label = all_labels[i]
-                confidence = float(all_probas[i][all_label_idxs[i]])
+                proba_row = all_probas[i]
+                confidence = float(proba_row[all_label_idxs[i]])
+                max_proba = float(np.max(proba_row))
+                sorted_proba = np.sort(proba_row)
+                margin = float(max_proba - sorted_proba[-2]) if len(sorted_proba) >= 2 else max_proba
+                uncertain = max_proba < reject_thresh or margin < margin_thresh
                 level1, level2 = self._map_label_to_taxonomy(label)
                 results.append(ClassificationResult(
                     level1_label=level1,
                     level2_label=level2,
                     confidence=confidence,
-                    source='embedding',
-                    reason=f'embedding model prediction, label={label}',
+                    source='embedding_uncertain' if uncertain else 'embedding',
+                    reason=(
+                        f'embedding uncertain (max_proba={max_proba:.3f} '
+                        f'margin={margin:.3f}) for label={label}'
+                    ) if uncertain else f'embedding model prediction, label={label}',
                 ))
             return results
         except Exception as e:
@@ -370,15 +423,37 @@ class Classifier:
             return [None] * len(texts)
 
     def _map_label_to_taxonomy(self, label: str) -> Tuple[str, str]:
-        """Map embedding model label to taxonomy level1/level2."""
+        """Map embedding model label to taxonomy level1/level2.
+
+        Mirrors config.yaml taxonomy. Falls back to ('未知/其他', '未分类')
+        for any label that isn't a known level1 (e.g. legacy dirty variants
+        that the LabelEncoder hadn't seen yet).
+        """
         label_map = {
             '账号交易': ('账号交易', '账号买卖'),
+            '账号买卖': ('账号交易', '账号买卖'),
+            '账号转让': ('账号交易', '账号转让'),
+            '账号租借': ('账号交易', '账号租借'),
+            '抖音号买卖': ('账号交易', '账号买卖'),
             '流量作弊': ('流量作弊', '刷粉刷赞'),
+            '刷粉': ('流量作弊', '刷粉'),
+            '刷赞': ('流量作弊', '刷赞'),
+            '刷量': ('流量作弊', '刷量'),
+            '刷播放量': ('流量作弊', '刷量'),
             '诈骗引流': ('诈骗引流', '刷单引流'),
+            '刷单': ('诈骗引流', '刷单引流'),
+            '杀猪盘': ('诈骗引流', '杀猪盘'),
+            '兼职诈骗': ('诈骗引流', '兼职诈骗'),
             '黑产工具': ('黑产工具', '接码平台'),
+            '接码': ('黑产工具', '接码平台'),
+            '群控': ('黑产工具', '群控工具'),
             '未知/其他': ('未知/其他', '未分类'),
         }
-        return label_map.get(label, ('未知/其他', '未分类'))
+        if label in label_map:
+            return label_map[label]
+        # Try to salvage dirty variants via the normalizer
+        normalized = self._normalize_level1_label(label)
+        return label_map.get(normalized, ('未知/其他', '未分类'))
 
     def _classify_by_llm(self, text: str, context: Dict[str, Any]) -> Optional[ClassificationResult]:
         """
@@ -394,11 +469,11 @@ class Classifier:
 分析以下文本，判断它属于哪种风险类型：
 
 风险类别：
-- 账号交易 (Account Trading) - 买卖账号、租号、换绑等
-- 流量作弊 (Traffic Cheating) - 刷粉、刷赞、刷量等
-- 诈骗引流 (Fraud Leads) - 刷单、杀猪盘、投资诈骗等
-- 黑产工具 (Black-market Tools) - 接码平台、群控工具等
-- 未知/其他 (Unknown/Other) - 无法判断或无风险
+- 账号交易 - 买卖账号、租号、换绑等
+- 流量作弊 - 刷粉、刷赞、刷量等
+- 诈骗引流 - 刷单、杀猪盘、投资诈骗等
+- 黑产工具 - 接码平台、群控工具等
+- 未知/其他 - 无法判断或无风险
 
 文本: {text}
 
@@ -469,6 +544,8 @@ class Classifier:
                 except Exception as e:
                     logger.warning(f"Failed to collect silver sample: {e}")
 
+            if classification_result is not None:
+                classification_result = self._normalize_result(classification_result)
             return classification_result
 
         except AllProvidersExhausted as e:
@@ -509,7 +586,11 @@ class Classifier:
             embed_results = await self._classify_by_embedding_batch(embed_texts, context)
             for j, idx in enumerate(needs_embedding):
                 r = embed_results[j]
-                if r and r.confidence >= self.embedding_threshold:
+                # Phase 2 open-set: if embedding flagged itself as uncertain
+                # (max_proba < reject_thresh or margin < margin_thresh), force
+                # fallback to LLM even if raw confidence is above the threshold.
+                uncertain = r is not None and r.source == 'embedding_uncertain'
+                if r and r.confidence >= self.embedding_threshold and not uncertain:
                     results[idx] = r
                 else:
                     needs_llm.append(idx)
@@ -579,6 +660,19 @@ class Classifier:
                     level1_label="未知/其他", level2_label="未分类",
                     confidence=0.5, source="rule",
                     reason="No classification path succeeded",
+                )
+
+        # Normalize all level1 labels to canonical form (prevent dirty labels
+        # from polluting the clues table and the next retrain's LabelEncoder)
+        for i in range(n):
+            r = results[i]
+            if r is not None:
+                results[i] = ClassificationResult(
+                    level1_label=self._normalize_level1_label(r.level1_label),
+                    level2_label=r.level2_label or "未分类",
+                    confidence=r.confidence,
+                    source=r.source,
+                    reason=r.reason,
                 )
         return results  # type: ignore
 

@@ -145,7 +145,50 @@ pipeline:
   classification:
     rule_confidence_threshold: 0.7
     embedding_confidence_threshold: 0.6
+    embedding_reject_threshold: 0.45     # Phase 2: max_proba < this -> 未知/其他
+    embedding_margin_threshold: 0.12     # Phase 2: top1-top2 margin < this -> 未知/其他
     llm_fallback_confidence: 0.6
+
+  # Phase 2: unknown discovery (UMAP + HDBSCAN + LLM)
+  unknown_discovery:
+    enabled: true
+    schedule_interval_hours: 24
+    min_cluster_size: 30
+    min_samples: 5
+    umap_n_components: 10
+    # n_neighbors: 15 for small data (<500/day), 30 for large data (>5000/day)
+    umap_n_neighbors: 15
+    umap_min_dist: 0.0
+    umap_metric: cosine
+    umap_random_state: 42
+    hdbscan_min_samples: 5
+    hdbscan_metric: euclidean
+    # New category admission gate
+    min_cluster_size_for_proposal: 50
+    min_appearance_days: 3
+    # Centroid sampling
+    top_k_samples_per_cluster: 30
+    # Code-level assertions
+    cosine_dedup_threshold: 0.85
+    min_level2_chars: 2
+    max_level2_chars: 6
+    min_llm_confidence: 0.8
+    # Candidate pool size for dedup
+    candidate_pool_max: 10000
+
+  # Phase 2: slang -> rule bridge
+  slang_to_rule_bridge:
+    enabled: true
+    # Batching controls
+    batch_size: 20
+    max_batches_per_day: 2
+    min_slang_length: 2
+    max_slang_length: 8
+    # Acceptance gate
+    embedding_consistency_threshold: 0.7
+    # Rollback: dynamic rule hit rate below this auto-disables
+    hit_rate_rollback_threshold: 0.4
+    min_hits_before_eval: 50
 
 # Slang Learning Module
 slang_learning:
@@ -238,6 +281,15 @@ taxonomy:
       level2_items:
         - level2_code: "UNCATEGORIZED"
           level2_name: "未分类"
+    - level1_code: "IRRELEVANT"
+      level1_name: "无关"
+      level2_items:
+        - level2_code: "NORMAL_CONTENT"
+          level2_name: "普通内容"
+        - level2_code: "ADVERTISEMENT"
+          level2_name: "广告"
+        - level2_code: "NOISE"
+          level2_name: "噪声"
 
 # Seed Words Configuration
 seed_words:
