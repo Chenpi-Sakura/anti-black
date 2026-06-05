@@ -60,8 +60,11 @@ class DaemonScheduler:
         # Start all loops
         self._tasks.append(asyncio.create_task(self._kafka_consumer_loop()))
         self._tasks.append(asyncio.create_task(self._slang_evolution_loop()))
+        self._tasks.append(asyncio.create_task(self._slang_to_rule_bridge_loop()))
         self._tasks.append(asyncio.create_task(self._error_book_loop()))
         self._tasks.append(asyncio.create_task(self._retrain_check_loop()))
+        # Phase 2.3: daily unknown category discovery
+        self._tasks.append(asyncio.create_task(self._unknown_discovery_loop()))
         # Background worker: drains deep_queue and runs batched LightRAG.
         self._tasks.append(asyncio.create_task(self._lightrag_worker_loop()))
 
@@ -522,6 +525,86 @@ class DaemonScheduler:
                     logger.info("Model retrain triggered")
             except Exception as e:
                 logger.error(f"Retrain check error: {e}", exc_info=True)
+
+    async def _slang_to_rule_bridge_loop(self):
+        """Phase 2.2 (FR-EVO-06): daily slang->rule bridge evaluation.
+
+        Evaluates CONFIRMED slangs as Stage 1 rule candidates with LLM
+        + Embedding dual-validation. Persists accepted rules to
+        antiblack.dynamic_rules, with hit-rate-based auto-rollback.
+        """
+        interval_hours = self.config.get('slang_to_rule_bridge', {}).get('loop_interval_hours', 24)
+        interval_seconds = interval_hours * 3600
+        logger.info(f"Slang-to-rule bridge loop started (interval: {interval_hours}h)")
+
+        # First run after a small delay so the daemon has settled
+        await asyncio.sleep(60)
+
+        while self._running:
+            await asyncio.sleep(interval_seconds)
+
+            if not self._running:
+                break
+
+            try:
+                from pipeline.slang_to_rule_bridge import SlangToRuleBridge
+                bridge = SlangToRuleBridge(config=self.config)
+                results = await bridge.evaluate_batch()
+                if results:
+                    accepted = sum(1 for r in results if r.get('status') == 'accepted')
+                    rejected = sum(1 for r in results if r.get('status') == 'rejected')
+                    logger.info(
+                        f"Slang->rule bridge: evaluated {len(results)} slangs "
+                        f"({accepted} accepted, {rejected} rejected)"
+                    )
+                # Periodic rollback: disable rules with hit_rate < threshold
+                try:
+                    disabled = bridge.rollback_low_quality_rules()
+                    if disabled:
+                        logger.info(f"Slang->rule bridge: auto-disabled {disabled} low-quality rules")
+                except Exception as e:
+                    logger.warning(f"Slang->rule rollback check failed: {e}")
+            except Exception as e:
+                logger.error(f"Slang->rule bridge error: {e}", exc_info=True)
+
+    async def _unknown_discovery_loop(self):
+        """Phase 2.3 (FR-UNK-01..08): daily unknown category discovery.
+
+        Pulls recent 'unknown/other' samples, runs UMAP + HDBSCAN clustering,
+        asks LLM to name each cluster (strong constraint prompt), and
+        persists accepted proposals to antiblack.pending_category_proposals
+        for human review.
+        """
+        interval_hours = self.config.get('unknown_discovery', {}).get('schedule_interval_hours', 24)
+        interval_seconds = interval_hours * 3600
+        logger.info(f"Unknown discovery loop started (interval: {interval_hours}h)")
+
+        # First run after a small delay so the daemon has settled
+        await asyncio.sleep(120)
+
+        while self._running:
+            await asyncio.sleep(interval_seconds)
+
+            if not self._running:
+                break
+
+            try:
+                from pipeline.unknown_discovery import UnknownDiscovery
+                ud = UnknownDiscovery(config=self.config)
+                proposals = await ud.run()
+                if proposals:
+                    logger.info(
+                        f"Unknown discovery: {len(proposals)} new proposals written "
+                        f"(pending human review)"
+                    )
+                    for p in proposals:
+                        logger.info(
+                            f"  proposal {p['proposal_id']}: cluster {p['cluster_id']} "
+                            f"(n={p['size']}) -> {p['level1']}/{p['level2']} "
+                            f"(conf={p['confidence']})"
+                        )
+            except Exception as e:
+                logger.error(f"Unknown discovery error: {e}", exc_info=True)
 
     async def _browser_automation_loop(self):
         """Automate browser button clicks for MediaCrawler."""
