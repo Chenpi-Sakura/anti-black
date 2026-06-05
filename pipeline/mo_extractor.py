@@ -12,6 +12,7 @@
   M.O. & Toolchain: TOOL / TACTIC / TARGET 三类节点
   Supply & Demand:  RESOURCE / INTENT / SCENE / PRICE 四类节点
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -125,22 +126,20 @@ LLM_MAX_RETRIES = 2
 
 
 async def _call_llm(prompt: str) -> str:
-    """调 MiniMax LLM 拿原始返回。失败抛异常，由 caller 决定如何降级。
+    """调 unified LLM client 拿原始返回。失败抛异常,由 caller 决定如何降级。
 
-    复用 services/lightrag_service.py:create_minimax_complete() 实现，
-    共用 OPENAI_API_KEY / LLM_API_BASE 环境变量。
+    Use models.clients.llm.LLMClient (multi-provider fallback chain).
     """
-    from services.lightrag_service import create_minimax_complete
+    from models.clients.llm import LLMClient
     from openai import APITimeoutError, APIError
 
-    llm_complete = create_minimax_complete()
+    client = LLMClient(timeout=LLM_TIMEOUT)
     last_err: Optional[Exception] = None
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
-            return await llm_complete(
+            return await client.complete(
                 prompt=prompt,
                 system_prompt="你是黑灰产情报分析助手，输出严格 JSON。",
-                history_messages=[],
             )
         except (APITimeoutError, APIError) as e:
             last_err = e
@@ -151,7 +150,7 @@ async def _call_llm(prompt: str) -> str:
                 await asyncio.sleep(backoff)
                 continue
             raise
-    # 不可达，类型检查器
+    # 不可达,类型检查器
     raise last_err if last_err else RuntimeError("LLM call exhausted retries")
 
 
@@ -264,6 +263,214 @@ class MOExtractor:
             })
 
         return {"entities": clean_entities, "relationships": clean_rels}
+
+    # --- Batch path (Layer 3 optimization for deep channel) ---
+
+    async def extract_batch(self, texts: List[str]) -> List[Dict[str, Any]]:
+        """Extract M.O. entities/relations from N texts in a single LLM call.
+
+        Returns N dicts in the same shape as extract():
+            {"entities": [...], "relationships": [...]}
+
+        Behavior:
+          - len(texts) == 0 → return []
+          - len(texts) == 1 → fall through to extract() (single-text path)
+          - Otherwise: 1 batched LLM call for the chunk; on parse/all-failed
+            exception, fall back to per-text extract() calls (don't drop work)
+          - _extract_cache (5-min MD5 TTL) is honored per-text inside the
+            batch; cache hits skip the LLM entirely
+        """
+        if not texts:
+            return []
+
+        if len(texts) == 1:
+            return [await self.extract(texts[0])]
+
+        from models.clients.llm import LLMClient, AllProvidersExhausted
+
+        # Per-text cache check (so a mostly-cached batch is mostly free)
+        results: List[Optional[Dict[str, Any]]] = [None] * len(texts)
+        uncached_indices: List[int] = []
+        for i, t in enumerate(texts):
+            h = hashlib.md5(t.encode("utf-8")).hexdigest()[:16]
+            cached = _cache_get(h)
+            if cached is not None:
+                results[i] = cached
+            else:
+                uncached_indices.append(i)
+
+        if not uncached_indices:
+            return [r for r in results if r is not None]  # type: ignore[misc]
+
+        # Split uncached into chunks of 8 (matches classify_batch default)
+        BATCH_SIZE = 8
+        chunks = [
+            uncached_indices[i:i + BATCH_SIZE]
+            for i in range(0, len(uncached_indices), BATCH_SIZE)
+        ]
+
+        client = LLMClient(timeout=120, max_retries=2)
+
+        async def one_batch(chunk_indices: List[int]) -> List[Optional[Dict[str, Any]]]:
+            chunk_texts = [texts[i] for i in chunk_indices]
+            prompt = self._build_mo_extract_batch_prompt(chunk_texts)
+            try:
+                raw = await client.complete(
+                    prompt=prompt,
+                    system_prompt="你是黑灰产 M.O. (Modus Operandi) 抽取助手,输出严格 JSON 数组。",
+                    max_tokens=16384,
+                    extra_body={"reasoning_effort": "low"},
+                )
+            except AllProvidersExhausted as e:
+                logger.warning(
+                    f"MO batched extract: all providers exhausted; "
+                    f"falling back to per-text for {len(chunk_indices)} texts: {e}"
+                )
+                return await asyncio.gather(*[self.extract(texts[i]) for i in chunk_indices])
+            except Exception as e:
+                logger.warning(
+                    f"MO batched extract failed: {e}; "
+                    f"falling back to per-text for {len(chunk_indices)} texts"
+                )
+                return await asyncio.gather(*[self.extract(texts[i]) for i in chunk_indices])
+
+            parsed = self._parse_mo_extract_batch_response(raw, len(chunk_texts))
+            # parsed is a list of length chunk_indices; each item is either
+            # a dict or None (parse miss). Cache non-None results.
+            out: List[Optional[Dict[str, Any]]] = []
+            for i, res in zip(chunk_indices, parsed):
+                if res is not None:
+                    h = hashlib.md5(texts[i].encode("utf-8")).hexdigest()[:16]
+                    _cache_put(h, res)
+                    out.append(res)
+                else:
+                    out.append(None)
+            return out
+
+        # Run chunks sequentially (LLMClient doesn't internally batch across calls)
+        # to keep token-bucket pacing predictable. The 5x reduction from 1→8
+        # texts-per-call is the primary win here.
+        chunk_outputs: List[List[Optional[Dict[str, Any]]]] = []
+        for chunk in chunks:
+            chunk_outputs.append(await one_batch(chunk))
+            # Inter-chunk pacing: same interval as Classifier PacingSemaphore
+            # to avoid 429 on the LLM provider.
+            await asyncio.sleep(1.0)
+
+        for co in chunk_outputs:
+            for item in co:
+                # Find the next None slot in results
+                for j in range(len(results)):
+                    if results[j] is None:
+                        results[j] = item
+                        break
+
+        # Fill any remaining None with empty extraction (per-text fallback)
+        for i in range(len(results)):
+            if results[i] is None:
+                results[i] = {"entities": [], "relationships": []}
+
+        return results  # type: ignore[misc]
+
+    @staticmethod
+    def _build_mo_extract_batch_prompt(texts: List[str]) -> str:
+        """Build prompt asking the LLM to extract MO from each text and return a JSON array.
+
+        Each text snippet is truncated to 400 chars to keep total prompt size
+        manageable for large batches.
+        """
+        parts = ["请对以下每条文本独立进行 M.O. (Modus Operandi) 抽取,严格按 JSON 数组返回:\n"]
+        for i, t in enumerate(texts, 1):
+            snippet = t[:400] if len(t) > 400 else t
+            parts.append(f"文本 {i}: {snippet}\n")
+        parts.append(
+            """
+返回格式( 严格 JSON, 无其他内容):
+[
+  {
+    "index": 1,
+    "entities": [
+      {"entity_name": "云控脚本", "entity_type": "TOOL|TACTIC|TARGET|RESOURCE|INTENT|SCENE|PRICE", "description": "..."}
+    ],
+    "relationships": [
+      {"src_id": "云控脚本", "tgt_id": "养号", "description": "...", "keywords": "enables|targets|supplies|demands|priced_at|alternative_to", "weight": 0.5}
+    ]
+  },
+  {"index": 2, ...}
+]
+
+要求:
+- 每条文本独立抽取,严格按输入顺序返回 index
+- entities 的 entity_type 限定在 TOOL/TACTIC/TARGET/RESOURCE/INTENT/SCENE/PRICE
+- relationships 的 keywords 限定在 enables/targets/supplies/demands/priced_at/alternative_to
+- 原文中没出现任何黑产相关内容时返回 {"index": N, "entities": [], "relationships": []}
+"""
+        )
+        return "".join(parts)
+
+    @staticmethod
+    def _parse_mo_extract_batch_response(
+        response_text: str, expected_n: int
+    ) -> List[Optional[Dict[str, Any]]]:
+        """Parse the batched LLM response into a list of N extraction dicts.
+
+        Returns a list of length expected_n; each item is either a dict
+        matching extract()'s output shape, or None if that slot couldn't be
+        parsed (caller will fill with empty extraction).
+
+        Handles:
+          - Direct JSON array
+          - Markdown-fenced ```json ... ```
+          - LLM adding prose around the JSON
+          - Partial responses (fewer items than expected)
+        Match items by their "index" field (preferred) or by position (fallback).
+        """
+        text = response_text.strip()
+        # Strip markdown fences
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
+
+        # Find the outermost JSON array
+        start = text.find("[")
+        end = text.rfind("]")
+        if start == -1 or end == -1 or end <= start:
+            logger.warning(
+                f"MO batched extract: no JSON array in response: {text[:200]!r}"
+            )
+            return [None] * expected_n
+
+        json_text = text[start:end + 1]
+        try:
+            arr = json.loads(json_text)
+        except json.JSONDecodeError as e:
+            logger.warning(
+                f"MO batched extract: JSON parse failed: {e}; text={text[:200]!r}"
+            )
+            return [None] * expected_n
+
+        if not isinstance(arr, list):
+            logger.warning(f"MO batched extract: response is not a list: {type(arr)}")
+            return [None] * expected_n
+
+        out: List[Optional[Dict[str, Any]]] = [None] * expected_n
+        for i, item in enumerate(arr):
+            if not isinstance(item, dict):
+                continue
+            idx = item.get("index", i + 1)  # default to position
+            try:
+                pos = int(idx) - 1
+            except (TypeError, ValueError):
+                pos = i
+            if 0 <= pos < expected_n and out[pos] is None:
+                # Normalize to extract()'s output shape
+                entities = item.get("entities", [])
+                relationships = item.get("relationships", [])
+                if not isinstance(entities, list):
+                    entities = []
+                if not isinstance(relationships, list):
+                    relationships = []
+                out[pos] = {"entities": entities, "relationships": relationships}
+        return out
 
     def to_lightrag_kg(
         self,

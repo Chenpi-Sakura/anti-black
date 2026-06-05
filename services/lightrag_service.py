@@ -6,7 +6,7 @@ import os
 import re
 import unicodedata
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from functools import partial
 
 logger = logging.getLogger(__name__)
@@ -31,8 +31,15 @@ _WS_COLLAPSE = re.compile(r"\s+")
 
 
 def create_minimax_complete():
-    """Create MiniMax LLM completion function (OpenAI-compatible)."""
-    from openai import AsyncOpenAI
+    """Create LLM completion function (OpenAI-compatible).
+
+    Backward-compat factory used by LightRAG. Internally delegates to the
+    unified LLMClient (multi-provider fallback chain) so the LightRAG
+    pipeline automatically benefits from provider failover.
+    """
+    from models.clients.llm import LLMClient
+
+    client = LLMClient(timeout=120)
 
     async def minimax_complete(
         prompt,
@@ -41,34 +48,20 @@ def create_minimax_complete():
         enable_cot: bool = False,
         **kwargs,
     ) -> str:
-        if history_messages is None:
-            history_messages = []
-
-        api_key = os.environ.get("OPENAI_API_KEY")
-        api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
-        model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
-
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-
-        for msg in history_messages:
-            messages.append(msg)
-
-        messages.append({"role": "user", "content": prompt})
-        
-        logger.info(f"[LLM Call] Triggering LightRAG Graph Extraction/Query (model={model})")
-
+        logger.info(
+            f"[LLM Call] Triggering LightRAG via LLMClient "
+            f"(primary={client.providers[0]['name']}, "
+            f"fallbacks={[p['name'] for p in client.providers[1:]]})"
+        )
         try:
-            async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    timeout=120
-                )
-                return response.choices[0].message.content
+            return await client.complete_with_history(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                history_messages=history_messages or [],
+                **kwargs,
+            )
         except Exception as e:
-            logger.error(f"MiniMax API call failed: {e}")
+            logger.error(f"LLM call failed: {e}")
             return f"Error: {str(e)}"
 
     return minimax_complete
@@ -218,6 +211,7 @@ class LightRAGIntegrator:
                 embedding_func=EmbeddingFunc(
                     embedding_dim=1024,  # bge-m3 outputs 1024 dim
                     max_token_size=8192,
+                    model_name=os.environ.get("OLLAMA_EMBEDDING_MODEL", "bge-m3:latest"),
                     func=create_ollama_embed(),
                 ),
                 # Storage backends (use correct storage names)
@@ -304,20 +298,27 @@ class LightRAGIntegrator:
 
     async def insert_custom_kg(
         self,
-        text: str,
+        payload: Union[str, Dict[str, Any]],
         source: str = "auto"
     ) -> Dict[str, Any]:
         """
         Insert with custom knowledge graph construction.
         Useful for structured data insertion.
+
+        Args:
+            payload: Either a `str` (raw text, LightRAG extracts entities) or
+                a `Dict` with keys {chunks, entities, relationships}
+                (pre-extracted by MOExtractor, LightRAG just persists).
+            source: Source tag (for logging only).
         """
         if not self._rag or not self._initialized:
             return {"success": False, "error": "LightRAG not initialized"}
 
         try:
-            # Use ainsert_custom_kg for controlled KG construction
-            await self._rag.ainsert_custom_kg(text)
-            return {"success": True, "text": text}
+            # Both str and dict go through ainsert_custom_kg; the underlying
+            # LightRAG API dispatches on type internally.
+            await self._rag.ainsert_custom_kg(payload)
+            return {"success": True}
         except Exception as e:
             logger.error(f"Failed to insert custom KG: {e}")
             return {"success": False, "error": str(e)}
@@ -376,6 +377,10 @@ class GraphProcessor:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.lightrag = LightRAGIntegrator(config)
+        # Eagerly construct MOExtractor (cheap, no I/O) so process_batch can
+        # skip the lazy-init check on the hot path.
+        from pipeline.mo_extractor import MOExtractor
+        self._mo_extractor = MOExtractor(config)
 
     async def initialize(self) -> None:
         """Initialize graph processor."""
@@ -384,6 +389,75 @@ class GraphProcessor:
     async def finalize(self) -> None:
         """Finalize graph processor."""
         await self.lightrag.finalize()
+
+    async def process_batch(self, deep_msgs: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Batched deep-channel processing for a list of deep-routed messages.
+
+        Flow (1 LLM call for N texts vs 1 call per text in process_message):
+          1. One batched LLM call extracts MO from all N texts at once
+             (MOExtractor.extract_batch, ~1 LLM call per 8 texts)
+          2. Combine N extraction dicts into one KG with all entities/relations
+          3. One ainsert_custom_kg call (Neo4j MERGE + bge-m3 embed in batch;
+             dedup by entity_name means re-processing is idempotent)
+          4. Persist PG entities per-message (counts only, idempotent)
+
+        Args:
+            deep_msgs: list of dicts, each with keys:
+                - message_id: str
+                - cleaned_text: str
+                - source_channel: str (optional, for PG entities)
+                - metadata: dict (optional)
+
+        Returns:
+            {"entities": int, "relationships": int} aggregate counts.
+        """
+        if not deep_msgs:
+            return {"entities": 0, "relationships": 0}
+
+        # Step 1: batched LLM extract
+        texts = [m['cleaned_text'] for m in deep_msgs]
+        try:
+            extract_results = await self._mo_extractor.extract_batch(texts)
+        except Exception as e:
+            logger.error(f"process_batch: extract_batch failed entirely: {e}")
+            # Don't drop PG persistence either — write empty extractions so the
+            # batch doesn't get stuck in a partial state.
+            extract_results = [{"entities": [], "relationships": []}] * len(deep_msgs)
+
+        # Step 2: combine into one KG dict
+        all_chunks: List[Dict[str, Any]] = []
+        all_entities: List[Dict[str, Any]] = []
+        all_relations: List[Dict[str, Any]] = []
+        for msg, er in zip(deep_msgs, extract_results):
+            kg = self._mo_extractor.to_lightrag_kg(er, msg['message_id'])
+            all_chunks.extend(kg.get('chunks', []))
+            all_entities.extend(kg.get('entities', []))
+            all_relations.extend(kg.get('relationships', []))
+
+        # Step 3: single combined insert (skip if nothing to insert)
+        if all_chunks or all_entities or all_relations:
+            combined_kg = {
+                'chunks': all_chunks,
+                'entities': all_entities,
+                'relationships': all_relations,
+            }
+            insert_result = await self.lightrag.insert_custom_kg(combined_kg)
+            if not insert_result.get("success"):
+                logger.warning(
+                    f"process_batch: insert_custom_kg returned failure: "
+                    f"{insert_result.get('error')}"
+                )
+
+        # Step 4: persist PG entities per-message (best-effort, doesn't block LightRAG)
+        for msg, er in zip(deep_msgs, extract_results):
+            try:
+                await self._persist_mo_entities(er, msg)
+            except Exception as e:
+                logger.warning(
+                    f"process_batch: PG persist failed for {msg.get('message_id')}: {e}"
+                )
+
+        return {"entities": len(all_entities), "relationships": len(all_relations)}
 
     async def process_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -406,11 +480,7 @@ class GraphProcessor:
             Processing result with extracted entities/relations
         """
         try:
-            from pipeline.mo_extractor import MOExtractor
-
-            if not hasattr(self, '_mo_extractor') or self._mo_extractor is None:
-                self._mo_extractor = MOExtractor(self.config)
-
+            # _mo_extractor is now eagerly constructed in __init__; no lazy check.
             raw_text = message.get('raw_text', '')
             message_id = message.get('message_id', '')
 

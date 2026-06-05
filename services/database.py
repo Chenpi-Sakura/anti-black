@@ -398,7 +398,7 @@ class PostgreSQLService:
 
         with self._get_cursor() as cur:
             cur.execute(sql.SQL("""
-                INSERT INTO {}.entities
+                INSERT INTO {schema}.entities AS e
                 (entity_id, entity_type, raw_value, normalized_value, first_seen, last_seen,
                  occurrence_count, source_channel, risk_labels, metadata)
                 VALUES (%(entity_id)s, %(entity_type)s, %(raw_value)s, %(normalized_value)s,
@@ -406,10 +406,10 @@ class PostgreSQLService:
                         %(risk_labels)s, %(metadata)s)
                 ON CONFLICT (entity_id) DO UPDATE SET
                     last_seen = NOW(),
-                    occurrence_count = {}.entities.occurrence_count + 1,
+                    occurrence_count = e.occurrence_count + 1,
                     risk_labels = %(risk_labels)s,
                     metadata = %(metadata)s
-            """).format(sql.Identifier(self.schema)), {
+            """).format(schema=sql.Identifier(self.schema)), {
                 'entity_id': entity_id,
                 'entity_type': doc['entity_type'],
                 'raw_value': doc.get('raw_value'),

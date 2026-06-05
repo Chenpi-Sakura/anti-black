@@ -4,13 +4,57 @@ Handles intent classification with rule/model/LLM三层分类.
 """
 import asyncio
 import concurrent.futures
+import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+# --- Layer 3: PacingSemaphore (rate-limited concurrency) ---
+class _PacingSemaphore:
+    """Combines a Semaphore (max concurrent) with a minimum interval between
+    acquisitions. Used to throttle external LLM API calls so we don't burst
+    against a rate-limited provider.
+
+    `acquire()` waits for BOTH:
+      - a free slot (semaphore)
+      - the interval since the last successful acquire to elapse
+    """
+
+    def __init__(self, max_slots: int = 8, interval_sec: float = 1.0):
+        self._sem = asyncio.Semaphore(max_slots)
+        self._lock = asyncio.Lock()
+        self._next_allowed = 0.0
+        self._interval = interval_sec
+
+    async def __aenter__(self):
+        await self._sem.acquire()
+        async with self._lock:
+            now = time.monotonic()
+            wait = self._next_allowed - now
+            self._next_allowed = max(now, self._next_allowed) + self._interval
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+    async def __aexit__(self, *exc):
+        self._sem.release()
+
+
+def _llm_pacing() -> _PacingSemaphore:
+    """Module-level LLM pacing semaphore. Configurable via env."""
+    global _pacing_sem
+    if _pacing_sem is None:
+        max_slots = int(os.environ.get("LLM_MAX_CONCURRENT", "8"))
+        interval = float(os.environ.get("LLM_MIN_INTERVAL_SEC", "1.0"))
+        _pacing_sem = _PacingSemaphore(max_slots=max_slots, interval_sec=interval)
+    return _pacing_sem
+
+_pacing_sem: Optional[_PacingSemaphore] = None
 
 
 @dataclass
@@ -264,20 +308,12 @@ class Classifier:
 
     def _classify_by_llm(self, text: str, context: Dict[str, Any]) -> Optional[ClassificationResult]:
         """
-        Classify using LLM fallback.
+        Classify using LLM fallback (via unified LLMClient with multi-provider chain).
         FR-EVO-01: Collect high-confidence LLM output as silver training sample.
         """
         import os
         import json
-        from openai import AsyncOpenAI
-
-        api_key = os.environ.get("OPENAI_API_KEY")
-        api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
-        model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
-
-        if not api_key:
-            logger.warning("OPENAI_API_KEY not set, LLM classification skipped")
-            return None
+        from models.clients.llm import LLMClient, AllProvidersExhausted
 
         prompt = f"""你是一个黑灰产情报分类专家。
 
@@ -298,32 +334,29 @@ class Classifier:
         logger.info(f"[LLM Call] Triggering Classifier Fallback for text: {text[:30]}...")
 
         try:
-            # Use a workaround to call async code from sync context
+            # The classify() method is sync; LLMClient is async. Use the same
+            # new-event-loop-in-threadpool workaround as before, but invoke
+            # the new LLMClient (which handles multi-provider fallback internally).
             import concurrent.futures
+            client = LLMClient(timeout=30)
             def _call_llm_sync():
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     async def fetch():
-                        async with AsyncOpenAI(api_key=api_key, base_url=api_base) as async_client:
-                            response = await async_client.chat.completions.create(
-                                model=model,
-                                messages=[{"role": "user", "content": prompt}],
-                                max_tokens=512,
-                                extra_body={"reasoning_effort": "low"},
-                                timeout=30
-                            )
-                            return response.choices[0].message.content
+                        return await client.complete(
+                            prompt=prompt,
+                            max_tokens=512,
+                            extra_body={"reasoning_effort": "low"},
+                        )
                     return loop.run_until_complete(fetch())
                 finally:
                     loop.run_until_complete(loop.shutdown_asyncgens())
                     loop.close()
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
+                # LLMClient already strips <|think_start|>/<think> tags in chat()
                 result_text = executor.submit(_call_llm_sync).result(timeout=60)
-
-            # Remove LLM thinking tags
-            result_text = re.sub(r'<\|think_start\|>.*?<\|think_end\|>', '', result_text, flags=re.DOTALL).strip()
 
             # Extract JSON
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
@@ -364,13 +397,112 @@ class Classifier:
 
             return classification_result
 
+        except AllProvidersExhausted as e:
+            logger.error(f"All LLM providers failed during classification: {e}")
+            return None
         except Exception as e:
             logger.error(f"LLM classification failed: {e}")
             return None
 
-    def classify_batch(self, texts: List[str], context: Dict[str, Any] = None) -> List[ClassificationResult]:
-        """Classify a batch of texts."""
-        return [self.classify(text, context) for text in texts]
+    async def classify_batch(self, texts: List[str], context: Dict[str, Any] = None) -> List[ClassificationResult]:
+        """Classify N texts using 3-stage cascade: rule → embedding → batched LLM.
+
+        Stage 1 (rules, fast, no network): per-text regex/keyword match.
+        Stage 2 (embedding, medium confidence): per-text Ollama call.
+        Stage 3 (LLM, rate-limited + batched): texts that need LLM are
+          sent 5-10 at a time in a single LLM call, with `_llm_pacing()`
+          ensuring at most `LLM_MAX_CONCURRENT` concurrent and
+          `LLM_MIN_INTERVAL_SEC` minimum interval between new LLM calls.
+
+        Returns N ClassificationResults, one per input text.
+        """
+        from models.clients.llm import LLMClient, AllProvidersExhausted
+        n = len(texts)
+        results: List[Optional[ClassificationResult]] = [None] * n
+
+        # Stage 1: rules (fast, no network) — try each text
+        for i, text in enumerate(texts):
+            r = self._classify_by_rules(text)
+            if r and r.confidence >= self.rule_threshold:
+                results[i] = r
+
+        # Stage 2: embedding (medium confidence) — one Ollama call per text
+        needs_llm: List[int] = []
+        for i in range(n):
+            if results[i] is None:
+                r = self._classify_by_embedding(texts[i], context)
+                if r and r.confidence >= self.embedding_threshold:
+                    results[i] = r
+                else:
+                    needs_llm.append(i)
+
+        # Stage 3: rate-limited + batched LLM for remaining
+        if needs_llm:
+            # timeout=120s: allow volcengine enough time for 4-text prompts.
+            # max_retries=2: internal retry on transient (timeout/5xx) errors.
+            # Rate limit is gated by the outer _PacingSemaphore — these are
+            # independent concerns (concurrency throttle vs per-call resilience).
+            client = LLMClient(timeout=120, max_retries=2)
+            llm_texts = [texts[i] for i in needs_llm]
+            pacing = _llm_pacing()
+
+            async def one_chunk_call(chunk: List[str]) -> List[str]:
+                """One rate-limited batched LLM call. Returns N JSON dict strings."""
+                async with pacing:  # rate-limited: max N concurrent, 1s between starts
+                    return await client.classify_batch(
+                        chunk,
+                        system_prompt=(
+                            "你是一个黑灰产情报分类专家。"
+                            "对每条文本独立判断它属于哪种风险类型。"
+                        ),
+                        batch_size=4,  # 4 texts per LLM call (was 8; smaller = faster)
+                        extra_body={"reasoning_effort": "low"},
+                    )
+
+            # Split into chunks of 4 (LLM_BATCH)
+            LLM_BATCH = 4
+            chunked = [llm_texts[i:i + LLM_BATCH] for i in range(0, len(llm_texts), LLM_BATCH)]
+            # Launch all chunks in parallel; pacing throttles the start rate
+            chunk_results = await asyncio.gather(*[one_chunk_call(c) for c in chunked])
+            llm_raw_results: List[str] = []
+            for cr in chunk_results:
+                llm_raw_results.extend(cr)
+
+            for j, raw in enumerate(llm_raw_results):
+                original_idx = needs_llm[j]
+                if not raw or raw == "{}":
+                    results[original_idx] = ClassificationResult(
+                        level1_label="未知/其他", level2_label="未分类",
+                        confidence=0.5, source="rule",
+                        reason="LLM batched classify returned no result",
+                    )
+                    continue
+                try:
+                    d = json.loads(raw)
+                except json.JSONDecodeError:
+                    results[original_idx] = ClassificationResult(
+                        level1_label="未知/其他", level2_label="未分类",
+                        confidence=0.5, source="rule",
+                        reason=f"LLM batched JSON parse failed: {raw[:100]!r}",
+                    )
+                    continue
+                results[original_idx] = ClassificationResult(
+                    level1_label=d.get("level1", "未知/其他") or "未知/其他",
+                    level2_label=d.get("level2", "未分类") or "未分类",
+                    confidence=float(d.get("confidence", 0.5) or 0.5),
+                    source="llm",
+                    reason=d.get("reason", ""),
+                )
+
+        # Default for any remaining None (shouldn't happen)
+        for i in range(n):
+            if results[i] is None:
+                results[i] = ClassificationResult(
+                    level1_label="未知/其他", level2_label="未分类",
+                    confidence=0.5, source="rule",
+                    reason="No classification path succeeded",
+                )
+        return results  # type: ignore
 
     # ========== FR-EVO-03: Model Retraining ==========
 

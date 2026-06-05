@@ -31,6 +31,12 @@ class DaemonScheduler:
         self.kafka_manager = None
         self._slang_learner = None
         self._browser_automator = None
+        # Dual-queue architecture: clue insertion is the fast path, deep
+        # channel (LightRAG) runs in a background worker that drains this
+        # queue. Decouples LightRAG's 10-30s latency from clue insertion
+        # (~1-2s/batch).
+        self._deep_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        self._graph_processor: Optional[Any] = None  # GraphProcessor (lazy import)
 
     async def start(self):
         """Start all scheduled tasks."""
@@ -43,11 +49,21 @@ class DaemonScheduler:
         # Initialize components
         await self._initialize_components()
 
+        # Initialize GraphProcessor ONCE (not per-batch) so the LightRAG
+        # backend handshake (5-15s) happens once at startup, not on every
+        # Kafka batch that has deep-routed messages.
+        from services.lightrag_service import GraphProcessor
+        self._graph_processor = GraphProcessor(self.config)
+        await self._graph_processor.initialize()
+        logger.info("GraphProcessor initialized (LightRAG ready)")
+
         # Start all loops
         self._tasks.append(asyncio.create_task(self._kafka_consumer_loop()))
         self._tasks.append(asyncio.create_task(self._slang_evolution_loop()))
         self._tasks.append(asyncio.create_task(self._error_book_loop()))
         self._tasks.append(asyncio.create_task(self._retrain_check_loop()))
+        # Background worker: drains deep_queue and runs batched LightRAG.
+        self._tasks.append(asyncio.create_task(self._lightrag_worker_loop()))
 
         logger.info(f"Started {len(self._tasks)} background tasks")
 
@@ -92,26 +108,73 @@ class DaemonScheduler:
         if self.kafka_manager:
             await self.kafka_manager.stop()
 
+        # Finalize GraphProcessor (after worker task is done draining queue)
+        if self._graph_processor:
+            await self._graph_processor.finalize()
+            logger.info("GraphProcessor finalized")
+
         logger.info("AntiBlack Daemon stopped")
 
     async def _kafka_consumer_loop(self):
-        """Consume messages from Kafka raw.messages topic continuously."""
+        """Consume messages from Kafka raw.messages topic continuously, in batches.
+
+        Layer 1 batching: getmany() fetches up to BATCH_SIZE messages per
+        iteration, fed to _process_messages which is now batch-aware.
+        Layer 2 batching: inside _process_messages, classifier.classify_batch
+        packs ~8 texts per LLM call (vs 1/call previously).
+        Layer 3 pacing: _PacingSemaphore in Classifier.classify_batch
+        ensures at most LLM_MAX_CONCURRENT concurrent LLM calls and at
+        least LLM_MIN_INTERVAL_SEC between new ones (avoids 429).
+        """
         topic = self.config.get('kafka', {}).get('topics', {}).get('raw_messages', 'raw.messages')
         group_id = self.config.get('kafka', {}).get('consumer_group', 'antiblack_pipeline')
-        
-        logger.info(f"Kafka consumer loop started for topic: {topic}, group: {group_id}")
-        
+
+        BATCH_SIZE = 20
+        POLL_TIMEOUT_MS = 500
+        BATCH_MAX_SECONDS = 40  # Kafka session timeout default is 45s; stay below
+        NO_MSG_BACKOFF = 0.05
+
+        logger.info(
+            f"Kafka consumer loop started: topic={topic}, group={group_id}, "
+            f"batch_size={BATCH_SIZE}, poll_timeout_ms={POLL_TIMEOUT_MS}"
+        )
+
         consumer = self.kafka_manager.get_consumer(topic, group_id)
         await consumer.start()
+        # Disable auto-commit; we commit manually after each batch is processed.
+        # Without this, auto-commit fires every 5s and could commit BEFORE
+        # the batch finishes, causing re-consume on restart.
+        try:
+            consumer._consumer._auto_commit = False
+        except Exception:
+            pass
 
         while self._running:
             try:
-                # Consume messages in small batches
-                await consumer.consume(self._process_kafka_message, max_messages=50)
+                loop = asyncio.get_event_loop()
+                t0 = loop.time()
+                batch = await consumer.getmany(
+                    timeout_ms=POLL_TIMEOUT_MS, max_records=BATCH_SIZE,
+                )
+                if not batch:
+                    await asyncio.sleep(NO_MSG_BACKOFF)
+                    continue
+                await self._process_messages(batch)
+                elapsed = loop.time() - t0
+                logger.info(
+                    f"Processed batch: {len(batch)} messages in {elapsed:.1f}s "
+                    f"({len(batch)/max(elapsed,0.001):.1f} msg/s)"
+                )
+                if elapsed > BATCH_MAX_SECONDS:
+                    logger.warning(
+                        f"Batch exceeded {BATCH_MAX_SECONDS}s ({elapsed:.1f}s); "
+                        f"consider lowering BATCH_SIZE"
+                    )
+                # Manual commit AFTER batch is processed
+                await consumer.commit()
             except Exception as e:
                 logger.error(f"Kafka consume error: {e}", exc_info=True)
-                
-            await asyncio.sleep(1)
+                await asyncio.sleep(1)
 
     async def _process_kafka_message(self, msg: Dict[str, Any]):
         """Handler for single Kafka message."""
@@ -121,7 +184,14 @@ class DaemonScheduler:
             logger.error(f"Failed to process message {msg.get('message_id')}: {e}")
 
     async def _process_messages(self, messages: List[Dict[str, Any]]):
-        """Process messages through the full pipeline."""
+        """Process messages through the full pipeline.
+
+        Cleaner / Classifier / Extractor are SYNC and CPU/IO bound (regex,
+        Ollama HTTP, sklearn.predict). Calling them directly inside this
+        async method would block the event loop for seconds during a
+        37k-comment backfill, causing Kafka consumer heartbeat loss and
+        group rebalance. Push each to the default ThreadPoolExecutor.
+        """
         from pipeline.cleaner import Cleaner
         from pipeline.classifier import Classifier
         from pipeline.extractor import Extractor
@@ -136,20 +206,26 @@ class DaemonScheduler:
         router = Router()
         pg_db = PostgreSQLService.get_instance()
 
-        # Clean
-        cleaned_messages = cleaner.clean(messages)
+        # Clean — sync, fast (regex + simhash dedup), but still push to thread
+        cleaned_messages = await asyncio.to_thread(cleaner.clean, messages)
+        if not cleaned_messages:
+            return
 
-        # Classify
-        classification_results = []
-        for msg in cleaned_messages:
-            result = classifier.classify(msg.cleaned_text, {"source_channel": msg.source_channel})
-            classification_results.append(result)
+        # Classify — batched (Layer 2: classifier.classify_batch internally
+        # uses 3-stage cascade + 5-10 messages per LLM call + pacing).
+        # classify_batch is now async (uses await internally), so call
+        # directly with await — no asyncio.to_thread wrapper needed.
+        cleaned_texts = [msg.cleaned_text for msg in cleaned_messages]
+        classification_results = await classifier.classify_batch(
+            cleaned_texts,
+            {"source_channel": "batch"},
+        )
 
-        # Extract
-        extraction_results = []
-        for msg in cleaned_messages:
-            result = extractor.extract(msg.message_id, msg.cleaned_text)
-            extraction_results.append(result)
+        # Extract — sync, pure regex, fast but still push to thread
+        extraction_results = await asyncio.gather(*[
+            asyncio.to_thread(extractor.extract, msg.message_id, msg.cleaned_text)
+            for msg in cleaned_messages
+        ])
 
         # Route
         route_results = []
@@ -237,36 +313,82 @@ class DaemonScheduler:
         )
         pg_db.upsert_metrics(metrics)
 
-        # Deep channel processing
-        deep_messages = [msg for msg, channel in zip(cleaned_messages, route_results) if channel == 'deep']
-        if deep_messages:
-            await self._process_deep_channel(deep_messages, classification_results, extraction_results, route_results)
+        # Enqueue deep-routed messages for the background LightRAG worker.
+        # Clue insertion is now COMPLETE; deep channel happens asynchronously.
+        # QueueFull → log + drop (entity extraction is best-effort, not critical path).
+        n_deep = 0
+        for msg, channel in zip(cleaned_messages, route_results):
+            if channel == 'deep':
+                try:
+                    self._deep_queue.put_nowait({
+                        "message_id": msg.message_id,
+                        "cleaned_text": msg.cleaned_text,
+                        "source_channel": msg.source_channel,
+                        "author": msg.author_id,
+                        "metadata": msg.metadata,
+                    })
+                    n_deep += 1
+                except asyncio.QueueFull:
+                    logger.warning(
+                        f"Deep queue full (size={self._deep_queue.qsize()}/1000); "
+                        f"dropping {msg.message_id} from LightRAG processing "
+                        f"(clue already inserted, entity extraction is best-effort)"
+                    )
+        if n_deep:
+            logger.info(
+                f"Enqueued {n_deep} deep messages; queue size={self._deep_queue.qsize()}"
+            )
 
-    async def _process_deep_channel(self, messages, classification_results, extraction_results, route_results):
-        """Process messages through LightRAG deep channel."""
-        from services.lightrag_service import GraphProcessor
+    async def _lightrag_worker_loop(self):
+        """Background worker: drain the deep queue, run batched LightRAG processing.
 
-        graph_processor = GraphProcessor(self.config)
-        await graph_processor.initialize()
+        Decouples LightRAG latency (10-30s per batch) from clue insertion
+        (~1-2s/batch). Single worker avoids LightRAG's coarse-grained
+        entity-write lock contention (lightrag.py:1750-1762).
+        """
+        LIGHT_RAG_BATCH = 8
+        POLL_TIMEOUT = 1.0
 
-        for i, msg in enumerate(messages):
-            if route_results[i] == 'deep':
-                idx = messages.index(msg)
-                await graph_processor.process_message({
-                    "message_id": msg.message_id,
-                    "raw_text": msg.original_text,
-                    "cleaned_text": msg.cleaned_text,
-                    "classification": {
-                        "level1_label": classification_results[idx].level1_label,
-                        "level2_label": classification_results[idx].level2_label
-                    },
-                    "entities": [
-                        {"entity_type": e.entity_type, "entity_value": e.entity_value}
-                        for e in extraction_results[idx].entities
-                    ]
-                })
+        logger.info(
+            f"LightRAG worker loop started (batch_size={LIGHT_RAG_BATCH}, "
+            f"poll_timeout={POLL_TIMEOUT}s)"
+        )
 
-        await graph_processor.finalize()
+        while self._running:
+            try:
+                batch = await self._drain_deep_queue(LIGHT_RAG_BATCH, POLL_TIMEOUT)
+                if not batch:
+                    continue
+                loop = asyncio.get_event_loop()
+                t0 = loop.time()
+                result = await self._graph_processor.process_batch(batch)
+                elapsed = loop.time() - t0
+                logger.info(
+                    f"LightRAG processed {len(batch)} deep msgs in {elapsed:.1f}s "
+                    f"({result['entities']} entities, {result['relationships']} relations)"
+                )
+            except Exception as e:
+                logger.error(f"LightRAG worker error: {e}", exc_info=True)
+                await asyncio.sleep(1)
+
+    async def _drain_deep_queue(self, max_size: int, timeout: float) -> List[Dict[str, Any]]:
+        """Block on queue for `timeout`s for first msg, then drain up to `max_size`.
+
+        Pattern: blocking wait on first item gives a natural idle signal
+        (no work → no LLM call → no rate pressure), then non-blocking drain
+        accumulates whatever else is available up to the batch ceiling.
+        """
+        try:
+            first = await asyncio.wait_for(self._deep_queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return []
+        batch = [first]
+        while len(batch) < max_size:
+            try:
+                batch.append(self._deep_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return batch
 
     async def _slang_evolution_loop(self):
         """Validate pending slang candidates every hour."""
