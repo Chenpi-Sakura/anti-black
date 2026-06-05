@@ -31,6 +31,14 @@ class DaemonScheduler:
         self.kafka_manager = None
         self._slang_learner = None
         self._browser_automator = None
+        # Pipeline components — instantiated once in _initialize_components()
+        # so per-batch reuse avoids reloading the embedding model (50KB pkl)
+        # every Kafka poll. Each Classifier() call previously triggered
+        # _load_embedding_model() which reads disk and unpickles a joblib blob.
+        self._cleaner = None
+        self._classifier = None
+        self._extractor = None
+        self._router = None
         # Dual-queue architecture: clue insertion is the fast path, deep
         # channel (LightRAG) runs in a background worker that drains this
         # queue. Decouples LightRAG's 10-30s latency from clue insertion
@@ -93,6 +101,27 @@ class DaemonScheduler:
             self.config, slang_mappings=existing_mappings, db_service=pg_db
         )
         logger.info("SlangLearner initialized")
+
+        # Pipeline components (Cleaner / Classifier / Extractor / Router) —
+        # instantiated ONCE here so each Kafka batch reuses the same objects
+        # instead of rebuilding them. Classifier() in particular triggers
+        # _load_embedding_model() which reads + unpickles the latest pkl;
+        # doing it per-batch (the old behavior) was a hidden I/O cost that
+        # also produced a noisy "Loaded embedding classifier" line in the
+        # log on every poll. The instance is thread-safe for our use because
+        # Pipeline._process_messages dispatches work via asyncio.to_thread,
+        # and sklearn predict is GIL-released for large matrices.
+        from pipeline.cleaner import Cleaner
+        from pipeline.classifier import Classifier
+        from pipeline.extractor import Extractor
+        from pipeline.router import Router
+        self._cleaner = Cleaner(self.config)
+        self._classifier = Classifier(self.config)
+        # Extractor takes slang_mappings, not config. Pull them from PG so
+        # the Extractor has the same view of slang the rest of the system has.
+        self._extractor = Extractor(slang_mappings=existing_mappings)
+        self._router = Router(self.config)
+        logger.info("Pipeline components initialized (Cleaner/Classifier/Extractor/Router)")
 
     async def stop(self):
         """Gracefully stop all tasks."""
@@ -194,19 +223,19 @@ class DaemonScheduler:
         async method would block the event loop for seconds during a
         37k-comment backfill, causing Kafka consumer heartbeat loss and
         group rebalance. Push each to the default ThreadPoolExecutor.
+
+        All four pipeline components (Cleaner/Classifier/Extractor/Router)
+        are shared instances created in _initialize_components() — reusing
+        them avoids reloading the embedding model on every Kafka poll.
         """
-        from pipeline.cleaner import Cleaner
-        from pipeline.classifier import Classifier
-        from pipeline.extractor import Extractor
-        from pipeline.router import Router
         from services.database import PostgreSQLService
         from models import Clue
         from utils import generate_id
 
-        cleaner = Cleaner()
-        classifier = Classifier()
-        extractor = Extractor()
-        router = Router()
+        cleaner = self._cleaner
+        classifier = self._classifier
+        extractor = self._extractor
+        router = self._router
         pg_db = PostgreSQLService.get_instance()
 
         # Clean — sync, fast (regex + simhash dedup), but still push to thread
@@ -238,7 +267,14 @@ class DaemonScheduler:
                 "source_channel": msg.source_channel,
                 "risk_level": classification_results[i].level1_label,
                 "entities": [{"type": e.entity_type} for e in extraction_results[i].entities],
-                "slang_mappings": [{"slang": s.slang} for s in extraction_results[i].slang_mappings],
+                # extractor returns List[Dict[str, str]] with keys 'slang_raw'
+                # and 'meaning' (see pipeline/extractor.py:111-114), NOT a
+                # SlangMapping dataclass instance. Pre-existing bug surfaced
+                # 2026-06-05 once slang_mappings stopped being empty.
+                "slang_mappings": [
+                    {"slang": s["slang_raw"], "meaning": s["meaning"]}
+                    for s in extraction_results[i].slang_mappings
+                ],
                 "raw_text": msg.original_text,
                 "cleaned_text": msg.cleaned_text,
             }
@@ -271,7 +307,10 @@ class DaemonScheduler:
                     source_group_id=msg.group_id,
                     source_author_id=msg.author_id,
                     entity_list=[{"entity_type": e.entity_type, "entity_value": e.entity_value, "source": "extractor"} for e in extraction_results[i].entities],
-                    slang_mappings=[{"slang": s.slang, "meaning": s.meaning} for s in extraction_results[i].slang_mappings],
+                    slang_mappings=[
+                        {"slang": s["slang_raw"], "meaning": s["meaning"]}
+                        for s in extraction_results[i].slang_mappings
+                    ],
                     query_id=None,
                     platform=msg.metadata.get("platform") if msg.metadata else None,
                     published_at=published_at
