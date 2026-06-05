@@ -35,6 +35,7 @@ class ModelManager:
         self._ocr_model = None
         self._ollama_client = None
         self._cloud_vlm_client = None
+        self._llm_client = None
         self._config = None
         self._initialized = True
         logger.info("ModelManager initialized")
@@ -144,6 +145,27 @@ class ModelManager:
             logger.info("Cloud VLM client created (lazy loading)")
         return self._cloud_vlm_client
 
+    @property
+    def llm(self):
+        """Get or create unified chat LLM client (with multi-provider fallback chain).
+
+        Single point of access for all chat LLM calls in the system. Each
+        caller should obtain the client via this property (or the global
+        `get_model_manager().llm`) and use `await client.chat(...)` /
+        `client.chat_raw(...)` / `client.complete(...)`.
+
+        Swapping models is a .env change (LLM_PRIMARY_*, LLM_FALLBACK_{N}_*);
+        no code change required.
+        """
+        if self._llm_client is None:
+            from models.clients.llm import LLMClient
+            self._llm_client = LLMClient()
+            logger.info(
+                f"LLM client created (lazy loading) with {len(self._llm_client.providers)} providers: "
+                + ", ".join(p["name"] for p in self._llm_client.providers)
+            )
+        return self._llm_client
+
     def get_vlm_client(self):
         """Get the best available VLM client (cloud优先)."""
         if self._cloud_vlm_client is not None:
@@ -179,6 +201,7 @@ class ModelManager:
             'ocr': self._ocr_model is not None,
             'ollama': self._ollama_client is not None,
             'cloud_vlm': self._cloud_vlm_client is not None,
+            'llm': self._llm_client is not None,
         }
 
 

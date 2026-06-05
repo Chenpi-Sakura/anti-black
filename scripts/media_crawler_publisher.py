@@ -48,15 +48,21 @@ class MediaCrawlerPublisher:
             for platform in platforms:
                 try:
                     logger.info(f"Polling content for platform: {platform}")
-                    messages = await self._adapter.poll_new_content(platform)
+                    post_msgs = await self._adapter.poll_new_content(platform)
+                    cmt_msgs  = await self._adapter.poll_new_comments(platform)
+                    messages  = post_msgs + cmt_msgs
                     if messages:
                         sent = await self._producer.send_raw_messages(messages, topic=self._topic)
-                        logger.info(f"Published {sent}/{len(messages)} messages from {platform} to {self._topic}")
+                        logger.info(
+                            f"Published {sent}/{len(messages)} messages from {platform} "
+                            f"(posts={len(post_msgs)}, comments={len(cmt_msgs)}) "
+                            f"to {self._topic}"
+                        )
                     else:
                         logger.info(f"No new content found for {platform}")
                 except Exception as e:
                     logger.error(f"Error polling/publishing for {platform}: {e}", exc_info=True)
-            
+
             logger.info(f"Waiting {interval} seconds before next poll...")
             await asyncio.sleep(interval)
             

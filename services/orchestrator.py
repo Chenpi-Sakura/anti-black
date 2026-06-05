@@ -156,12 +156,11 @@ class Orchestrator:
     def __init__(self, config: dict = None):
         self.config = config or get_config()
 
-        api_key = os.environ.get("OPENAI_API_KEY")
-        api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
-        model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
-
-        self.llm_client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-        self.model = model
+        from models.clients.llm import LLMClient
+        self.llm = LLMClient(timeout=60)
+        # Backward-compat alias for any code that still references these names
+        self.llm_client = self.llm  # legacy attribute (used to be AsyncOpenAI)
+        self.model = self.llm.providers[0]["model"] if self.llm.providers else None
 
         self.db = PostgreSQLService.get_instance()
 
@@ -214,15 +213,14 @@ class Orchestrator:
 
         while True:
             try:
-                # 调用 LLM（带工具）
-                response = await self.llm_client.chat.completions.create(
-                    model=self.model,
+                # 调用 unified LLM client (带工具;多 provider fallback 链)
+                response = await self.llm.chat_raw(
                     messages=messages,
                     tools=TOOLS,
                     tool_choice="auto",
                     max_tokens=2048,
                     temperature=0.3,
-                    extra_body={"reasoning_effort": "low"}
+                    extra_body={"reasoning_effort": "low"},
                 )
 
                 choice = response.choices[0]

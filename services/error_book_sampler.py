@@ -110,15 +110,11 @@ class ErrorBookSampler:
 
     async def _llm_judge(self, clue: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Call LLM to classify a single clue.
+        Call unified LLM client to classify a single clue.
         Returns:
             Dict with keys: label, reason, confidence
         """
-        from openai import AsyncOpenAI
-
-        api_key = os.environ.get("OPENAI_API_KEY")
-        api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
-        model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
+        from models.clients.llm import LLMClient
 
         prompt = f"""You are a black-market intelligence classification expert.
 
@@ -141,20 +137,14 @@ Return JSON:
         logger.info(f"[LLM Call] Triggering Error Book LLM Judge for clue: {clue.get('clue_id')}")
 
         try:
-            async with AsyncOpenAI(api_key=api_key, base_url=api_base) as client:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=1024,
-                    extra_body={"reasoning_effort": "low"},
-                    timeout=60
-                )
-                result_text = response.choices[0].message.content
+            client = LLMClient(timeout=60)
+            result_text = await client.complete(
+                prompt=prompt,
+                max_tokens=1024,
+                extra_body={"reasoning_effort": "low"},
+            )
 
-            # Remove LLM thinking tags
-            result_text = re.sub(r'<\|think_start\|>.*?<\|think_end\|>', '', result_text, flags=re.DOTALL).strip()
-
-            # Extract JSON
+            # Extract JSON (LLMClient already stripped thinking tags)
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())

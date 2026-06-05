@@ -457,13 +457,8 @@ class SlangLearner:
         所有 `re.search` 均走 `_safe_regex_search`，防止大模型返回的灾难性
         回溯正则卡死事件循环。
         """
-        api_key = os.environ.get("OPENAI_API_KEY")
-        api_base = os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
-        model = os.environ.get("LLM_MODEL", "MiniMax-M2.7")
-
-        if not api_key:
-            logger.warning("OPENAI_API_KEY not set, slang LLM validation skipped")
-            return False
+        from models.clients.llm import LLMClient
+        client = LLMClient(timeout=120, max_retries=0)
 
         logger.info(f"[LLM Call] Triggering Slang Validation for candidate: '{candidate.word}'")
 
@@ -523,18 +518,11 @@ class SlangLearner:
 }}"""
 
         try:
-            client = AsyncOpenAI(api_key=api_key, base_url=api_base)
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
+            result_text = await client.complete(
+                prompt=prompt,
                 max_tokens=8192,
                 extra_body={"reasoning_effort": "low"},
-                timeout=120
             )
-            result_text = response.choices[0].message.content
-
-            # 去除 LLM thinking tags (<think>...</think>)
-            result_text = re.sub(r'<think>.*?</think>', '', result_text, flags=re.DOTALL).strip()
 
             logger.info(f"LLM raw response for {candidate.word}: {result_text[:500]}")
 

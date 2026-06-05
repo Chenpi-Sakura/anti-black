@@ -101,7 +101,7 @@ class KafkaConsumer:
             self._consumer = None
 
     async def consume(self, handler: Callable[[Dict[str, Any]], None], max_messages: int = 100) -> int:
-        """Consume messages and process with handler."""
+        """Consume messages and process with handler (per-message, sequential)."""
         if not self._consumer:
             logger.error("Kafka consumer is not initialized.")
             return 0
@@ -122,6 +122,28 @@ class KafkaConsumer:
             logger.error(f"Error consuming messages: {e}")
 
         return processed
+
+    async def getmany(self, timeout_ms: int = 500, max_records: int = 50) -> list:
+        """Return a list of decoded payloads (up to `max_records`), waiting
+        up to `timeout_ms` for at least one. Returns [] on timeout.
+
+        Used by the daemon for batched consumption (Layer 1 optimization).
+        """
+        if not self._consumer:
+            return []
+        result = await self._consumer.getmany(
+            timeout_ms=timeout_ms, max_records=max_records
+        )
+        out: list = []
+        for tp, msgs in result.items():
+            for m in msgs:
+                out.append(m.value)
+        return out
+
+    async def commit(self) -> None:
+        """Manual offset commit (paired with batched consumption)."""
+        if self._consumer:
+            await self._consumer.commit()
 
 
 class KafkaManager:
