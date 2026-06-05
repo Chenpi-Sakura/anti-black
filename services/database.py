@@ -1524,11 +1524,10 @@ class PostgreSQLService:
             ), params)
 
             if cur.rowcount == 0:
-                # Insert if not exists
-                params['id'] = 'status'
+                # Insert if not exists (params already contains id='status' from line above)
                 placeholders = ', '.join([f"%({k})s" for k in params.keys()])
                 cur.execute(sql.SQL(f"""
-                    INSERT INTO {self.schema}.auto_evolution (id, {', '.join(params.keys())})
+                    INSERT INTO {self.schema}.auto_evolution ({', '.join(params.keys())})
                     VALUES ({placeholders})
                 """).as_string(self._conn), params)
 

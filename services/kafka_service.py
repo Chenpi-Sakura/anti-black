@@ -84,7 +84,12 @@ class KafkaConsumer:
                 group_id=self.group_id,
                 value_deserializer=lambda m: json.loads(m.decode('utf-8')),
                 auto_offset_reset=self.config.get('consumer', {}).get('auto_offset_reset', 'earliest'),
-                enable_auto_commit=self.config.get('consumer', {}).get('enable_auto_commit', True)
+                enable_auto_commit=self.config.get('consumer', {}).get('enable_auto_commit', True),
+                # 120s allows 2 slow batches (the 70.2s first batch was hitting
+                # the previous default and causing CommitFailedError rebalances).
+                # Default Kafka is 300s but aiokafka's default is 45s; 120s
+                # gives headroom for the cold-start first batch.
+                max_poll_interval_ms=120000,
             )
             await self._consumer.start()
             self._running = True

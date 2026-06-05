@@ -4,6 +4,7 @@ Checks sample counts and triggers model retraining when threshold is reached.
 """
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from config import get_config
@@ -58,9 +59,9 @@ class ModelRetrainer:
         # Threshold reached - trigger retraining
         logger.info(f"Retrain threshold reached: {total} samples, triggering retrain")
 
-        # Update status to QUEUED
+        # Update status to TRIGGERED
         self._db.update_auto_evolution_status({
-            'retrain_status': RetrainStatus.QUEUED
+            'retrain_status': RetrainStatus.TRIGGERED
         })
 
         # Trigger async retraining (non-blocking)
@@ -114,7 +115,7 @@ class ModelRetrainer:
                 self._db.update_auto_evolution_status({
                     'retrain_status': RetrainStatus.COMPLETED,
                     'current_model_version': new_version,
-                    'last_retrain_at': asyncio.get_event_loop().time()
+                    'last_retrain_at': datetime.utcnow().isoformat()
                 })
             else:
                 logger.error("Model retraining failed")

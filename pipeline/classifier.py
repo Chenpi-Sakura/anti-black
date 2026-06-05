@@ -247,6 +247,9 @@ class Classifier:
         """
         Classify using embedding model (Ollama bge-m3 + sklearn classifier).
         Falls back to None if model not available or Ollama unreachable.
+
+        Single-text path used by `classify()` (API server). For batched
+        calls from the daemon hot path, use `_classify_by_embedding_batch`.
         """
         if not self._embedding_clf or not self._embedding_le:
             return None
@@ -294,6 +297,77 @@ class Classifier:
         except Exception as e:
             logger.debug(f"Embedding classification failed: {e}")
             return None
+
+    async def _classify_by_embedding_batch(
+        self, texts: List[str], context: Dict[str, Any]
+    ) -> List[Optional[ClassificationResult]]:
+        """Batched Stage 2: ONE async Ollama call for all texts.
+
+        Replaces N sync HTTP calls (one per text in `_classify_by_embedding`)
+        with 1 async HTTP call that sends the full list. Saves ~3-4s per
+        20-text batch on the daemon hot path (eliminates N round-trips
+        + serial event-loop blocking).
+
+        Returns N ClassificationResults, one per input text (None for
+        texts that failed embedding or predict). Caller decides whether
+        to send a None-result text on to Stage 3 (LLM).
+
+        Failure semantics differ from per-text version: if the Ollama
+        call itself fails, ALL texts in the batch return None and fall
+        through to LLM. Per-text failures during predict are isolated.
+        """
+        if not self._embedding_clf or not self._embedding_le or not texts:
+            return [None] * len(texts)
+
+        try:
+            import httpx
+            import numpy as np
+
+            OLLAMA_API_URL = "http://localhost:11434/api/embed"
+            EMBEDDING_MODEL = "bge-m3"
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    OLLAMA_API_URL,
+                    json={"model": EMBEDDING_MODEL, "input": texts}
+                )
+                response.raise_for_status()
+                embeddings = response.json().get('embeddings', [])
+
+            if not embeddings or len(embeddings) != len(texts):
+                logger.warning(
+                    f"Embedding batch: got {len(embeddings) if embeddings else 0} "
+                    f"embeddings, expected {len(texts)}"
+                )
+                return [None] * len(texts)
+
+            # Vectorized predict: one numpy matrix + two sklearn calls
+            # for the whole batch (sklearn's C backend batches internally).
+            X_emb = np.array(embeddings, dtype=np.float32)  # (N, dim)
+            try:
+                all_label_idxs = self._embedding_clf.predict(X_emb)
+                all_probas = self._embedding_clf.predict_proba(X_emb)
+                all_labels = self._embedding_le.inverse_transform(all_label_idxs)
+            except Exception as e:
+                logger.warning(f"Embedding batch predict failed: {e}")
+                return [None] * len(texts)
+
+            results: List[Optional[ClassificationResult]] = []
+            for i in range(len(texts)):
+                label = all_labels[i]
+                confidence = float(all_probas[i][all_label_idxs[i]])
+                level1, level2 = self._map_label_to_taxonomy(label)
+                results.append(ClassificationResult(
+                    level1_label=level1,
+                    level2_label=level2,
+                    confidence=confidence,
+                    source='embedding',
+                    reason=f'embedding model prediction, label={label}',
+                ))
+            return results
+        except Exception as e:
+            logger.warning(f"Embedding batch classification failed: {e}")
+            return [None] * len(texts)
 
     def _map_label_to_taxonomy(self, label: str) -> Tuple[str, str]:
         """Map embedding model label to taxonomy level1/level2."""
@@ -408,7 +482,8 @@ class Classifier:
         """Classify N texts using 3-stage cascade: rule → embedding → batched LLM.
 
         Stage 1 (rules, fast, no network): per-text regex/keyword match.
-        Stage 2 (embedding, medium confidence): per-text Ollama call.
+        Stage 2 (embedding, medium confidence): one batched Ollama call for all
+          texts that didn't match rules (was: per-text sync call).
         Stage 3 (LLM, rate-limited + batched): texts that need LLM are
           sent 5-10 at a time in a single LLM call, with `_llm_pacing()`
           ensuring at most `LLM_MAX_CONCURRENT` concurrent and
@@ -426,15 +501,18 @@ class Classifier:
             if r and r.confidence >= self.rule_threshold:
                 results[i] = r
 
-        # Stage 2: embedding (medium confidence) — one Ollama call per text
+        # Stage 2: embedding (medium confidence) — ONE batched Ollama call
         needs_llm: List[int] = []
-        for i in range(n):
-            if results[i] is None:
-                r = self._classify_by_embedding(texts[i], context)
+        needs_embedding = [i for i in range(n) if results[i] is None]
+        if needs_embedding:
+            embed_texts = [texts[i] for i in needs_embedding]
+            embed_results = await self._classify_by_embedding_batch(embed_texts, context)
+            for j, idx in enumerate(needs_embedding):
+                r = embed_results[j]
                 if r and r.confidence >= self.embedding_threshold:
-                    results[i] = r
+                    results[idx] = r
                 else:
-                    needs_llm.append(i)
+                    needs_llm.append(idx)
 
         # Stage 3: rate-limited + batched LLM for remaining
         if needs_llm:
@@ -568,9 +646,14 @@ class Classifier:
             le = LabelEncoder()
             y = le.fit_transform(labels)
 
-            # 3. Split data
+            # 3. Split data (use stratify only when every class has >= 2 members)
+            import numpy as np
+            unique, counts = np.unique(y, return_counts=True)
+            stratify = y if counts.min() >= 2 else None
+            if stratify is None:
+                logger.warning(f"Some classes have < 2 members (class distribution: {dict(zip(unique.tolist(), counts.tolist()))}); using non-stratified split")
             X_train, X_test, y_train, y_test, w_train, w_test = train_test_split(
-                embeddings, y, weights, test_size=0.2, stratify=y, random_state=42
+                embeddings, y, weights, test_size=0.2, stratify=stratify, random_state=42
             )
 
             # 4. Train sklearn LogisticRegression with sample weights

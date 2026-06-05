@@ -424,6 +424,23 @@ class GraphProcessor:
             # batch doesn't get stuck in a partial state.
             extract_results = [{"entities": [], "relationships": []}] * len(deep_msgs)
 
+        # Diagnostic: when 0 entities is returned, log enough context to
+        # distinguish "LLM legitimately returned 0 for all 8" vs
+        # "parse failed (all 8 returned None)" vs "all 8 cache hits with
+        # empty results". Without this, 0-entity batches look identical.
+        if all(len(er.get("entities", [])) == 0 for er in extract_results):
+            preview = [t[:60].replace("\n", " ") for t in texts[:3]]
+            n_uncached_or_fail = sum(
+                1 for er in extract_results
+                if not er.get("entities") and not er.get("relationships")
+            )
+            logger.warning(
+                f"process_batch: 0 entities/relations across {len(texts)} msgs. "
+                f"msg_ids={[m.get('message_id', '?') for m in deep_msgs[:3]]}... "
+                f"first-texts={preview}... "
+                f"(if all texts are non-黑产 noise, 0 entities is correct)"
+            )
+
         # Step 2: combine into one KG dict
         all_chunks: List[Dict[str, Any]] = []
         all_entities: List[Dict[str, Any]] = []
