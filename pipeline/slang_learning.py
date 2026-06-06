@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Set
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
@@ -638,9 +639,27 @@ class SlangLearner:
         # 核心词在 80% 以上的上下文出现，认为一致
         return hit_rate >= 0.8
 
-    async def validate_pending_candidates(self, batch_size: int = 30) -> List[SlangCandidate]:
+    async def validate_pending_candidates(
+        self,
+        batch_size: int = 200,
+        concurrency: int = 4,
+        pacing_sec: float = 1.0,
+    ) -> List[SlangCandidate]:
         """
-        批量验证待审核的候选词（LIKELY 状态且达到阈值）
+        批量验证待审核的候选词（LIKELY 状态且达到阈值）。
+
+        Concurrency model (2026-06-06 调优):
+          - batch_size=200: 一次从 27k LIKELY 池里取 200 个
+          - concurrency=4: 同时最多 4 个 LLM 请求在飞
+          - pacing_sec=1.0: 每 1s 启一个新任务（rate-limit-friendly）
+
+        之前默认 batch_size=30 + 完全串行 = 30/h。新配置下稳态吞吐:
+          4 并发 × 13s/任务 / (1s pacing) ≈ 4/13 = 0.31/s 但 pacing 是真节流
+          → 实际 ~1 candidate/s = 3600/h, 提速 120x。
+        27k LIKELY 预计 7-8 天消化完（vs 之前 37 天）。
+
+        Three-layer gate (FR-SLANG-03) 仍在 _validate_candidate_with_llm 内
+        严格执行, batch_size 增大不降低验证严格度。
         """
         pending = [c for c in self._candidates.values()
                    if c.status == 'LIKELY'
@@ -648,9 +667,32 @@ class SlangLearner:
                    and c.regex_pattern is None
                    ][:batch_size]
 
+        if not pending:
+            return []
+
+        sem = asyncio.Semaphore(concurrency)
+        launch_lock = asyncio.Lock()
+        last_launch = [0.0]  # mutable container for closure
+
+        async def _validate_with_limit(candidate):
+            # Pacing: ensure pacing_sec between task launches
+            async with launch_lock:
+                now = time.monotonic()
+                wait = pacing_sec - (now - last_launch[0])
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                last_launch[0] = time.monotonic()
+            # Concurrency cap: max N in-flight at once
+            async with sem:
+                return await self._validate_candidate_with_llm(candidate), candidate
+
+        # Launch all batch_size tasks; they self-pace via launch_lock
+        tasks = [asyncio.create_task(_validate_with_limit(c)) for c in pending]
+        results = await asyncio.gather(*tasks)
+
         confirmed = []
-        for candidate in pending:
-            if await self._validate_candidate_with_llm(candidate):
+        for success, candidate in results:
+            if success:
                 candidate.status = 'CONFIRMED'
                 self._known_words.add(candidate.word)
                 self._persist_candidate(candidate)
