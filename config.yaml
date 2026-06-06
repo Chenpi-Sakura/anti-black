@@ -152,7 +152,7 @@ pipeline:
   # Phase 2: unknown discovery (UMAP + HDBSCAN + LLM)
   unknown_discovery:
     enabled: true
-    schedule_interval_hours: 24
+    loop_interval_hours: 12
     min_cluster_size: 30
     min_samples: 5
     umap_n_components: 10
@@ -179,6 +179,7 @@ pipeline:
   # Phase 2: slang -> rule bridge
   slang_to_rule_bridge:
     enabled: true
+    loop_interval_hours: 12
     # Batching controls
     batch_size: 20
     max_batches_per_day: 2

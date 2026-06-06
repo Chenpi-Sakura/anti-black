@@ -433,27 +433,64 @@ class DaemonScheduler:
         return batch
 
     async def _slang_evolution_loop(self):
-        """Validate pending slang candidates every hour."""
-        interval = self.config.get('daemon', {}).get('slang_evolution_interval_seconds', 3600)
-        logger.info(f"Slang evolution loop started (interval: {interval}s)")
+        """Validate pending slang candidates.
+
+        Trigger model (2026-06-06 调优):
+          - 之前: 固定每小时 1 次, 不管 LIKELY 队列大小
+          - 之后: 每 60s 检查 LIKELY 队列, ≥ MIN_LIKELY_TO_TRIGGER (5) 立即评估,
+            否则等下分钟再看 (idle wait). 实质是事件驱动 + idle fallback.
+
+        收益:
+          - 5 条 LIKELY 到达时立即评估 (不等 1h)
+          - 没有候选时几乎零开销 (只跑 1 个 count 查询, 60s 一次)
+          - 27k LIKELY 现在 1 小时内可评估 3,600 候选 (vs 之前 30/h)
+
+        阈值 MIN_LIKELY_TO_TRIGGER=5 选 5 而非 1:
+          - 太小会触发频繁 LLM call (1 个 1 个评估)
+          - 5 是 batch_size=200 的 ~2.5%, 避免长尾空闲时反复启 LLM
+        """
+        check_interval = 60  # 每分钟 polling 一次（idle 时零成本）
+        min_likely_to_trigger = 5  # LIKELY 队列 ≥ 5 立即评估
+        logger.info(
+            f"Slang evolution loop started "
+            f"(check_interval={check_interval}s, min_likely={min_likely_to_trigger})"
+        )
 
         while self._running:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(check_interval)
+
+            if not self._running:
+                break
 
             try:
-                if self._slang_learner:
-                    confirmed = await self._slang_learner.validate_pending_candidates()
-                    if confirmed:
-                        await self._persist_confirmed_slang(confirmed)
-                        logger.info(f"LLM validated {len(confirmed)} new CONFIRMED slang")
+                if not self._slang_learner:
+                    continue
+                # Cheap pre-check: count LIKELY candidates before invoking
+                # the heavier validate_pending_candidates path.
+                likely_count = self._slang_learner.get_likely_count()
+                if likely_count < min_likely_to_trigger:
+                    logger.debug(
+                        f"Slang evolution: {likely_count} LIKELY candidates "
+                        f"< threshold {min_likely_to_trigger}, idle wait"
+                    )
+                    continue
 
-                    # 末位淘汰：命中率 < 5% 且出现 ≥ 200 次的 CONFIRMED/STABLE
-                    eliminated = await self._slang_learner.eliminate_weak_slangs()
-                    if eliminated:
-                        logger.info(f"Slang elimination: removed {eliminated} ineffective slangs")
+                logger.info(
+                    f"Slang evolution: {likely_count} LIKELY candidates "
+                    f"≥ threshold {min_likely_to_trigger}, triggering validation"
+                )
+                confirmed = await self._slang_learner.validate_pending_candidates()
+                if confirmed:
+                    await self._persist_confirmed_slang(confirmed)
+                    logger.info(f"LLM validated {len(confirmed)} new CONFIRMED slang")
 
-                    stats = self._slang_learner.get_candidate_stats()
-                    logger.info(f"Slang learning stats: {stats}")
+                # 末位淘汰：命中率 < 5% 且出现 ≥ 200 次的 CONFIRMED/STABLE
+                eliminated = await self._slang_learner.eliminate_weak_slangs()
+                if eliminated:
+                    logger.info(f"Slang elimination: removed {eliminated} ineffective slangs")
+
+                stats = self._slang_learner.get_candidate_stats()
+                logger.info(f"Slang learning stats: {stats}")
             except Exception as e:
                 logger.error(f"Slang evolution error: {e}", exc_info=True)
 
@@ -614,7 +651,7 @@ class DaemonScheduler:
         persists accepted proposals to antiblack.pending_category_proposals
         for human review.
         """
-        interval_hours = self.config.get('unknown_discovery', {}).get('schedule_interval_hours', 24)
+        interval_hours = self.config.get('unknown_discovery', {}).get('loop_interval_hours', 24)
         interval_seconds = interval_hours * 3600
         logger.info(f"Unknown discovery loop started (interval: {interval_hours}h)")
 

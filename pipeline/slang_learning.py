@@ -805,6 +805,16 @@ class SlangLearner:
             stats[c.status] += 1
         return dict(stats)
 
+    def get_likely_count(self) -> int:
+        """Count LIKELY candidates ready for LLM validation.
+
+        Cheaper than get_candidate_stats() because it doesn't allocate
+        a dict. Used by daemon's slang_evolution_loop for the
+        "≥MIN_LIKELY_TO_TRIGGER?" pre-check before invoking the
+        heavier validate_pending_candidates() path.
+        """
+        return sum(1 for c in self._candidates.values() if c.status == 'LIKELY')
+
 
 class SlangDictionary:
     """Manages slang dictionary with mappings."""
