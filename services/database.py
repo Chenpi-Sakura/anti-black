@@ -83,6 +83,13 @@ class PostgreSQLService:
             f"(ThreadedConnectionPool min=2 max=20)"
         )
 
+    @classmethod
+    def get_instance(cls) -> 'PostgreSQLService':
+        """Get singleton instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
     def _get_cursor(self):
         """Get a new cursor (or pooled context).
 
@@ -97,56 +104,57 @@ class PostgreSQLService:
             # Backward-compat path: fall back to legacy single connection.
             # Only hits during _init_schema before _connect() returns.
             return self._conn.cursor()
-        return _PooledCursor(self._pool)
+        # _PooledCursor is a nested class (declared inside PostgreSQLService
+        # to keep it out of the module namespace), so reference via self.
+        return self._PooledCursor(self._pool)
 
+    class _PooledCursor:
+        """Context manager: borrow a pooled connection, yield its cursor, return on exit.
 
-class _PooledCursor:
-    """Context manager: borrow a pooled connection, yield its cursor, return on exit.
+        Used as:
+            with _PooledCursor(pool) as cur:
+                cur.execute(...)
 
-    Used as:
-        with _PooledCursor(pool) as cur:
-            cur.execute(...)
+        psycopg2 ThreadedConnectionPool.getconn() returns a connection
+        checked out of the pool; putconn() returns it. We set autocommit=True
+        on each borrowed connection so callers don't need explicit commit().
+        """
 
-    psycopg2 ThreadedConnectionPool.getconn() returns a connection
-    checked out of the pool; putconn() returns it. We set autocommit=True
-    on each borrowed connection so callers don't need explicit commit().
-    """
+        def __init__(self, pg_pool):
+            self._pool = pg_pool
+            self._conn = None
+            self._cur = None
 
-    def __init__(self, pg_pool):
-        self._pool = pg_pool
-        self._conn = None
-        self._cur = None
+        def __enter__(self):
+            self._conn = self._pool.getconn()
+            try:
+                self._conn.autocommit = True
+            except Exception:
+                pass
+            self._cur = self._conn.cursor()
+            return self._cur
 
-    def __enter__(self):
-        self._conn = self._pool.getconn()
-        try:
-            self._conn.autocommit = True
-        except Exception:
-            pass
-        self._cur = self._conn.cursor()
-        return self._cur
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        # IMPORTANT-fix #9 (2026-06-07): on exception, ROLLBACK the
-        # transaction and put the connection back with close=True so
-        # the pool drops it instead of handing a poisoned
-        # (InFailedSqlTransaction) connection to the next borrower.
-        try:
-            if self._cur is not None:
-                self._cur.close()
-        finally:
-            if self._conn is not None:
-                if exc_type is not None:
-                    # Exception path: drop the connection.
-                    try:
-                        self._conn.rollback()
-                    except Exception:
-                        pass
-                    self._pool.putconn(self._conn, close=True)
-                else:
-                    # Happy path: return to pool for reuse.
-                    self._pool.putconn(self._conn)
-        return False
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            # IMPORTANT-fix #9 (2026-06-07): on exception, ROLLBACK the
+            # transaction and put the connection back with close=True so
+            # the pool drops it instead of handing a poisoned
+            # (InFailedSqlTransaction) connection to the next borrower.
+            try:
+                if self._cur is not None:
+                    self._cur.close()
+            finally:
+                if self._conn is not None:
+                    if exc_type is not None:
+                        # Exception path: drop the connection.
+                        try:
+                            self._conn.rollback()
+                        except Exception:
+                            pass
+                        self._pool.putconn(self._conn, close=True)
+                    else:
+                        # Happy path: return to pool for reuse.
+                        self._pool.putconn(self._conn)
+            return False
 
     def get_last_retrain_silver_total(self) -> Optional[int]:
         """Return the silver+platinum total snapshot from the last successful
@@ -1942,13 +1950,6 @@ class _PooledCursor:
                 cur.execute(idx_def)
 
         logger.info(f"Created telegram schema and {len(table_defs)} tables with {len(indexes)} indexes")
-
-    @classmethod
-    def get_instance(cls) -> 'PostgreSQLService':
-        """Get singleton instance."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
 
 
 # Alias for backward compatibility
