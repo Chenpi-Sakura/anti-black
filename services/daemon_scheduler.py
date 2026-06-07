@@ -353,8 +353,23 @@ class DaemonScheduler:
         logger.info(f"Inserted {clues_inserted} clues into database")
 
         # Slang learning
+        # IMPORTANT-fix #8 (2026-06-07): wrap in to_thread so the
+        # sync PG writes inside process_text (state transitions
+        # call _persist_candidate) don't block the asyncio loop.
+        # Previously a batch where several candidates crossed the
+        # LIKELY threshold would freeze Kafka consumer + LightRAG
+        # worker for tens of ms.
         for msg in cleaned_messages:
-            self._slang_learner.process_text(msg.cleaned_text, source_channel=msg.source_channel)
+            try:
+                await asyncio.to_thread(
+                    self._slang_learner.process_text,
+                    msg.cleaned_text,
+                    source_channel=msg.source_channel,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"process_text failed for {msg.message_id}: {e}"
+                )
 
         # Update metrics
         from models import Metrics

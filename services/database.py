@@ -127,12 +127,25 @@ class _PooledCursor:
         return self._cur
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # IMPORTANT-fix #9 (2026-06-07): on exception, ROLLBACK the
+        # transaction and put the connection back with close=True so
+        # the pool drops it instead of handing a poisoned
+        # (InFailedSqlTransaction) connection to the next borrower.
         try:
             if self._cur is not None:
                 self._cur.close()
         finally:
             if self._conn is not None:
-                self._pool.putconn(self._conn)
+                if exc_type is not None:
+                    # Exception path: drop the connection.
+                    try:
+                        self._conn.rollback()
+                    except Exception:
+                        pass
+                    self._pool.putconn(self._conn, close=True)
+                else:
+                    # Happy path: return to pool for reuse.
+                    self._pool.putconn(self._conn)
         return False
 
     def get_last_retrain_silver_total(self) -> Optional[int]:
@@ -1675,28 +1688,23 @@ class _PooledCursor:
         set_clauses = []
         params = {'id': 'status'}
         for k, v in updates.items():
-            set_clauses.append(f"{k} = %({k})s")
+            if k == 'id':
+                continue
+            set_clauses.append(f"{k} = EXCLUDED.{k}")
             params[k] = v
 
         with self._get_cursor() as cur:
-            cur.execute(sql.SQL("""
-                UPDATE {}.auto_evolution
-                SET {}
-                WHERE id = 'status'
-            """).format(
-                sql.Identifier(self.schema),
-                sql.SQL(', '.join(set_clauses))
-            ), params)
+            # IMPORTANT-fix #7 (2026-06-07): single-statement upsert
+            # replaces the old UPDATE-then-INSERT race.
+            cols = list(params.keys())
+            placeholders = ', '.join([f"%({k})s" for k in cols])
+            cur.execute(sql.SQL(f"""
+                INSERT INTO {self.schema}.auto_evolution ({', '.join(cols)})
+                VALUES ({placeholders})
+                ON CONFLICT (id) DO UPDATE SET {', '.join(set_clauses)}
+            """), params)
 
-            if cur.rowcount == 0:
-                # Insert if not exists (params already contains id='status' from line above)
-                placeholders = ', '.join([f"%({k})s" for k in params.keys()])
-                cur.execute(sql.SQL(f"""
-                    INSERT INTO {self.schema}.auto_evolution ({', '.join(params.keys())})
-                    VALUES ({placeholders})
-                """).as_string(self._conn), params)
-
-            return True
+        return True
 
     # ========== System Status ==========
 
