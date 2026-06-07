@@ -139,6 +139,27 @@ All data entities are dataclasses defined in `models/entities.py`:
 - Conda environment: run commands with `conda run -n <env_name> <command>` syntax
 - **Commit 需要先 CR (code review)**: 任何代码改动（包括但不限于 .py / .yaml / .sql / .md 改写）必须先给用户看 diff 或概要，等用户确认后才能 `git commit`。除非用户明确说"直接提交"
 
+### CR Checklist (Code Review 自查清单)
+
+每次写完代码、commit **之前**，必须用此清单自查——Phase 3 累计 12 个隐 bug 全是这条单子能抓到的：
+
+| # | 检查项 | 反例 | 怎么验 |
+|---|---|---|---|
+| 1 | **方法挂载点是否真生效** | monkey-patch 调 `PostgreSQLService.X = ...`，但 `extend_X()` 从未被调 → `X` 永远不存在 | `grep` 找 `extend_` / `register_` / `_init_` 函数，确认有调用点（**不是定义点**） |
+| 2 | **static vs instance vs classmethod** | `@staticmethod` 调成 `self._db.method()` → `AttributeError` | 看定义处的装饰器，调用前先 `ast` 一下函数签名 |
+| 3 | **嵌套 class 缩进** | 嵌套类所有方法都 0-indent → Python 把父类方法全吸进嵌套类 | `python -c "import ast; ast.parse(open(f).read())"` + 看 class 缩进 |
+| 4 | **autocommit 下多 conn.commit()** | `autocommit=True` 调 `conn.commit()` 报 ProgrammingError | `grep "autocommit" services/database.py` 后看所有 commit 调用点 |
+| 5 | **async + 同步 I/O** | `async def` 里直接调 `cur.execute(...)`（psycopg2 同步阻塞）→ 整个事件循环卡死 | `grep -A3 "async def" services/daemon_scheduler.py \| grep -B1 "cur.execute\\|conn.cursor\\|getconn"` |
+| 6 | **gather 取消传播** | `asyncio.gather(*[...])` 默认一抛全 cancel → sibling 任务全死 | 所有 `gather` 必带 `return_exceptions=True` |
+| 7 | **asyncio.Lock + 飞检标志** | 两个 task 都看到条件满足并发跑同一资源 → 重复副作用 | 飞 fire-and-forget 前 `async with lock` + `self._in_flight = True` |
+| 8 | **持久化触发条件** | `_persist_x` 只在状态转移时调 → NEW 状态永远不落库 | 看 entity 生命周期，**所有非纯 read 的 mutate 都应持久化** |
+| 9 | **pool.putconn 异常路径** | `try/finally` 只 `putconn(conn)` → 异常时连接不还 | `finally: try rollback; putconn(close=True)` |
+| 10 | **threshold 默认值 0** | 启动 baseline=0 → 第一次 polling 立即触发全量历史 | 启动失败时 baseline 留 `None`，首次 tick 跳过 |
+| 11 | **死代码快速判别** | `if not self._db: continue` 但 `__init__` 从未设 `self._db` → 永远 True | 写完条件看依赖的 attr 在哪初始化、是否真初始化 |
+| 12 | **导包函数同名** | `scripts/trigger_retrain.py` 导 `extend_postgres_service` 但导自 `model_retrainer`（同名）→ 实际挂载的是错的 module | `from X import Y` 后立刻 `print(Y.__module__)` 验 |
+
+**用法**：每次准备 commit 前，对改动的所有文件跑这 12 条——能当场发现 P0-P5 实施时那 12 个 bug 里的 8 个。剩下 4 个（#4 #6 #7 #8）需要读整个 loop / dataflow 才看得出。
+
 ## CDP Mode (Chrome DevTools Protocol)
 
 The crawler uses CDP mode for anti-detection when connecting to an existing Chrome browser.
