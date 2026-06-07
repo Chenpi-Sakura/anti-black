@@ -516,6 +516,12 @@ class DaemonScheduler:
         阈值 MIN_LIKELY_TO_TRIGGER=5 选 5 而非 1:
           - 太小会触发频繁 LLM call (1 个 1 个评估)
           - 5 是 batch_size=200 的 ~2.5%, 避免长尾空闲时反复启 LLM
+
+        ⚠️ DOC (2026-06-07): `min_likely_to_trigger` is the DAEMON-LOOP
+        trigger threshold, NOT the state-machine transition threshold.
+        The state machine's LIKELY→CONFIRMED gate is at
+        config.yaml `slang_learning.thresholds.likely_to_confirmed`
+        (default 50 occurrences). Do not confuse the two.
         """
         check_interval = 60  # 每分钟 polling 一次（idle 时零成本）
         min_likely_to_trigger = 5  # LIKELY 队列 ≥ 5 立即评估

@@ -193,7 +193,14 @@ pipeline:
 
 # Slang Learning Module
 slang_learning:
-  # State machine thresholds
+  # State machine thresholds (govern candidate promotion inside
+  # pipeline/slang_learning.py). Do NOT confuse with daemon-loop
+  # trigger thresholds (e.g. min_likely_to_trigger in
+  # services/daemon_scheduler.py:_slang_evolution_loop), which
+  # control when the validator runs, not when state transitions
+  # fire. The state machine runs whenever a candidate's
+  # occurrence_count crosses these gates; the daemon loop is
+  # just the poller that decides when to start an LLM batch.
   thresholds:
     new_to_observed: 10      # NEW -> OBSERVED
     observed_to_likely: 20    # OBSERVED -> LIKELY
