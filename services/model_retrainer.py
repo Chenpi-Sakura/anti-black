@@ -201,17 +201,33 @@ class ModelRetrainer:
                 )
             else:
                 logger.error("Model retraining failed")
+                # IMPORTANT-fix #6 (2026-06-07): also persist
+                # last_retrain_silver_total on failure, otherwise
+                # check_and_trigger next tick will see the same delta
+                # (essentially unchanged from this attempt) and fire
+                # again. Persisting the snapshot means we wait for
+                # ANOTHER full 1000-delta of new silver data before
+                # retrying, which gives time for whatever broke
+                # (LLM rate-limit, disk full, etc.) to clear.
                 await asyncio.to_thread(
                     self._db.update_auto_evolution_status,
-                    {'retrain_status': RetrainStatus.FAILED}
+                    {
+                        'retrain_status': RetrainStatus.FAILED,
+                        'last_retrain_silver_total': snapshot_total,
+                    }
                 )
 
         except Exception as e:
             logger.error(f"Retrain error: {e}", exc_info=True)
             try:
+                # IMPORTANT-fix #6: also write snapshot on unhandled
+                # exception so we don't immediately retry on next tick.
                 await asyncio.to_thread(
                     self._db.update_auto_evolution_status,
-                    {'retrain_status': RetrainStatus.FAILED}
+                    {
+                        'retrain_status': RetrainStatus.FAILED,
+                        'last_retrain_silver_total': snapshot_total,
+                    }
                 )
             except Exception:
                 pass
