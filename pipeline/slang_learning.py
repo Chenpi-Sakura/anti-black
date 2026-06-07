@@ -282,6 +282,16 @@ class SlangLearner:
                 return False
             if is_blacklisted(w):
                 return False
+            # BUG-FIX (2026-06-07): stopword filter for high-frequency daily
+            # phrases (我尝试/话说/羡慕/你建议/买手机/一直在/努力).
+            # Without this, 27k LIKELY pool is mostly daily phrases and
+            # each LLM rejection costs 5-15s. O(1) Set lookup.
+            try:
+                from config.slang_stopwords import is_stopword
+                if is_stopword(w):
+                    return False
+            except ImportError:
+                pass
             return True
 
         def add(w: str) -> None:
@@ -385,11 +395,25 @@ class SlangLearner:
         count = candidate.occurrence_count
         trigger_msg_id = None
 
+        # BUG-FIX (2026-06-07): per-message distinctness guard. Phrases
+        # like "合适的话我就收了" can have 20 occurrences all from 2-3
+        # messages (people copy-paste), inflating occurrence_count
+        # without real diversity. Require >= 5 distinct message_ids
+        # to advance to LIKELY. REJECTED/LIKELY/CONFIRMED stay as-is.
+        def _distinct_msg_count() -> int:
+            if not candidate.contexts:
+                return 0
+            return len({mid for mid, _ in candidate.contexts if mid is not None})
+
         if status == 'NEW' and count >= self.thresholds['new_to_observed']:
+            if _distinct_msg_count() < 3:
+                return None
             candidate.status = 'OBSERVED'
             candidate.inference_count = 1
 
         elif status == 'OBSERVED' and count >= self.thresholds['observed_to_likely']:
+            if _distinct_msg_count() < 5:
+                return None
             candidate.status = 'LIKELY'
             candidate.inference_count = 2
 
@@ -401,10 +425,6 @@ class SlangLearner:
             candidate.status = 'STABLE'
 
         return trigger_msg_id
-
-    def _get_context(self, text: str, word: str) -> str:
-        """Get context around the word - store full original text for LLM validation."""
-        return text  # 返回完整原始句子，供后续 LLM 验证使用
 
     @staticmethod
     def _is_redos_unsafe(pattern: str) -> bool:
@@ -701,10 +721,19 @@ class SlangLearner:
 
         # Launch all batch_size tasks; they self-pace via launch_lock
         tasks = [asyncio.create_task(_validate_with_limit(c)) for c in pending]
-        results = await asyncio.gather(*tasks)
+        # BUG-FIX (2026-06-07, CR #6): return_exceptions=True so one failed
+        # validation doesn't cancel siblings (e.g. transient LLM 429 cascade
+        # would otherwise wipe the whole batch).
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         confirmed = []
-        for success, candidate in results:
+        for r in results:
+            if isinstance(r, Exception):
+                # CR #6: sibling failure surfaced as Exception; skip but don't
+                # re-raise so the rest of the batch completes.
+                logger.warning(f"Slang validation task raised: {r}")
+                continue
+            success, candidate = r
             if success:
                 candidate.status = 'CONFIRMED'
                 self._known_words.add(candidate.word)
