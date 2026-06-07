@@ -549,64 +549,79 @@ class DaemonScheduler:
                 logger.error(f"Slang evolution error: {e}", exc_info=True)
 
     async def _persist_confirmed_slang(self, candidates):
-        """Persist confirmed slang to database."""
+        """Persist confirmed slang to database.
+
+        P0-2 follow-up (2026-06-07): the entire for-loop body
+        (which makes 4 sync PG calls per candidate —
+        upsert_slang_candidate, upsert_slang_mapping,
+        get_slang_recent_occurrences, promote_seed_word) is
+        wrapped in asyncio.to_thread() so the event loop doesn't
+        freeze while a CONFIRMED slang is being persisted.
+
+        Logging is intentionally kept in the main thread for
+        immediate observability (DB ops run inside the worker,
+        not the asyncio loop).
+        """
         from services.database import PostgreSQLService
         from models import SlangCandidate as DBSlangCandidate, SlangMapping as DBSlangMapping
         from utils import generate_id
 
         pg_db = PostgreSQLService.get_instance()
 
-        for candidate in candidates:
-            db_candidate = DBSlangCandidate(
-                candidate_word=candidate.word,
-                contexts=[text for _, text in candidate.contexts],
-                occurrence_count=candidate.occurrence_count,
-                status=candidate.status,
-                inference_count=candidate.inference_count,
-                regex_pattern=candidate.regex_pattern,
-                meaning=candidate.meaning,
-                source_channel=candidate.source_channel
-            )
-            pg_db.upsert_slang_candidate(db_candidate)
-
-            db_mapping = DBSlangMapping(
-                mapping_id=generate_id("slang"),
-                slang_raw=candidate.word,
-                meaning=candidate.meaning,
-                regex_pattern=candidate.regex_pattern,
-                source='learned',
-                verified=True,
-                confidence=1.0
-            )
-            pg_db.upsert_slang_mapping(db_mapping)
-            logger.info(f"Persisted slang: {candidate.word} -> {candidate.meaning}")
-
-            # Note (2026-06-03): 取消 FR-SLANG-06 旧的 LightRAG 写入。
-            # 原方案对每个 CONFIRMED slang 调 insert_custom_kg 写一段 4 行
-            # "黑话/释义/正则/来源" 自包含文本，但实际只产生孤立 slang
-            # 节点（无上下文关联、无共现边），且 PG `slang_mappings` 表 +
-            # GIN 索引已提供完整 hybrid 检索能力。LightRAG 此前的价值仅剩
-            # "防止 REJECTED 词污染 hybrid 检索"，该需求可由查询阶段
-            # `JOIN slang_mappings WHERE status='CONFIRMED'` 替代。
-            # 收益：省 1 LLM call/CONFIRMED + Neo4j 写；消除 slang→LightRAG
-            # 双向维护链路。
-
-            # FR-COL-11: Promote to seed word using 7-day frequency (not historical total count)
-            try:
-                recent_count = pg_db.get_slang_recent_occurrences(
-                    word=candidate.word,
-                    channel=candidate.source_channel,
-                    days=7
+        def _persist_all():
+            """All 4 sync PG ops per candidate, in one thread."""
+            results = []
+            for candidate in candidates:
+                db_candidate = DBSlangCandidate(
+                    candidate_word=candidate.word,
+                    contexts=[text for _, text in candidate.contexts],
+                    occurrence_count=candidate.occurrence_count,
+                    status=candidate.status,
+                    inference_count=candidate.inference_count,
+                    regex_pattern=candidate.regex_pattern,
+                    meaning=candidate.meaning,
+                    source_channel=candidate.source_channel
                 )
-                if recent_count >= 100:
-                    pg_db.promote_seed_word(
+                pg_db.upsert_slang_candidate(db_candidate)
+
+                db_mapping = DBSlangMapping(
+                    mapping_id=generate_id("slang"),
+                    slang_raw=candidate.word,
+                    meaning=candidate.meaning,
+                    regex_pattern=candidate.regex_pattern,
+                    source='learned',
+                    verified=True,
+                    confidence=1.0
+                )
+                pg_db.upsert_slang_mapping(db_mapping)
+
+                # FR-COL-11: Promote to seed word using 7-day frequency
+                promoted = False
+                try:
+                    recent_count = pg_db.get_slang_recent_occurrences(
                         word=candidate.word,
-                        operator="slang_learning",
-                        reason=f"CONFIRMED slang, {recent_count} occurrences in past 7 days"
+                        channel=candidate.source_channel,
+                        days=7
                     )
-                    logger.info(f"Promoted slang to seed word: {candidate.word} (recent_count={recent_count})")
-            except Exception as e:
-                logger.warning(f"Seed word promotion failed for {candidate.word}: {e}")
+                    if recent_count >= 100:
+                        pg_db.promote_seed_word(
+                            word=candidate.word,
+                            operator="slang_learning",
+                            reason=f"CONFIRMED slang, {recent_count} occurrences in past 7 days"
+                        )
+                        promoted = True
+                except Exception as e:
+                    logger.warning(
+                        f"Seed word promotion failed for {candidate.word}: {e}"
+                    )
+                results.append((candidate, promoted))
+            return results
+
+        results = await asyncio.to_thread(_persist_all)
+        for candidate, promoted in results:
+            logger.info(f"Persisted slang: {candidate.word} -> {candidate.meaning}")
+            if promoted:
+                logger.info(f"Promoted slang to seed word: {candidate.word}")
 
 
     async def _send_to_dlq(self, topic: str, batch: Dict, error_msg: str) -> int:
