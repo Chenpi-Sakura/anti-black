@@ -74,7 +74,12 @@ class DaemonScheduler:
         # Phase 2.3: daily unknown category discovery
         self._tasks.append(asyncio.create_task(self._unknown_discovery_loop()))
         # Background worker: drains deep_queue and runs batched LightRAG.
-        self._tasks.append(asyncio.create_task(self._lightrag_worker_loop()))
+        # P1 (2026-06-07): 3 concurrent workers instead of 1. The asyncio.Queue
+        # in _deep_queue is thread-safe; workers auto-load-balance. With
+        # 24h ~11k deep-routed messages, 1 worker (batch_size=8, ~30s/batch)
+        # couldn't keep up. 3 workers should keep deep_queue size near zero.
+        for _ in range(3):
+            self._tasks.append(asyncio.create_task(self._lightrag_worker_loop()))
 
         logger.info(f"Started {len(self._tasks)} background tasks")
 
@@ -96,7 +101,10 @@ class DaemonScheduler:
         from services.database import PostgreSQLService
 
         pg_db = PostgreSQLService.get_instance()
-        existing_mappings = {m['slang_raw']: m['meaning'] for m in pg_db.get_all_slang_mappings()}
+        existing_mappings = {
+            m['slang_raw']: m['meaning']
+            for m in await asyncio.to_thread(pg_db.get_all_slang_mappings)
+        }
         self._slang_learner = SlangLearner(
             self.config, slang_mappings=existing_mappings, db_service=pg_db
         )
@@ -205,7 +213,19 @@ class DaemonScheduler:
                 # Manual commit AFTER batch is processed
                 await consumer.commit()
             except Exception as e:
+                # Poison batch: write each msg to DLQ, then commit so the
+                # consumer advances past the bad batch. Without DLQ + commit,
+                # a single bad message would re-consume forever (poison pill).
                 logger.error(f"Kafka consume error: {e}", exc_info=True)
+                try:
+                    await self._send_to_dlq(topic, batch, str(e))
+                except Exception as dlq_err:
+                    logger.error(f"DLQ write also failed: {dlq_err}", exc_info=True)
+                # Commit anyway so we move past the poison batch
+                try:
+                    await consumer.commit()
+                except Exception as commit_err:
+                    logger.error(f"Commit after DLQ failed: {commit_err}")
                 await asyncio.sleep(1)
 
     async def _process_kafka_message(self, msg: Dict[str, Any]):
@@ -254,10 +274,20 @@ class DaemonScheduler:
         )
 
         # Extract — sync, pure regex, fast but still push to thread
+        # CR-fix (2026-06-07): return_exceptions=True so a single bad
+        # extraction doesn't cancel the other 19 and lose the whole
+        # batch to the DLQ. Failed entries become Exception instances
+        # in the result list; we filter them out before the next stage.
         extraction_results = await asyncio.gather(*[
             asyncio.to_thread(extractor.extract, msg.message_id, msg.cleaned_text)
             for msg in cleaned_messages
-        ])
+        ], return_exceptions=True)
+        # Drop exceptions, keep results aligned to cleaned_messages.
+        # We use a sentinel ("__EXC__") and re-raise only if EVERYTHING
+        # failed (otherwise the partial batch still gets persisted).
+        if extraction_results and all(isinstance(r, Exception) for r in extraction_results):
+            raise extraction_results[0]
+        extraction_results = [r for r in extraction_results if not isinstance(r, Exception)]
 
         # Route
         route_results = []
@@ -315,7 +345,7 @@ class DaemonScheduler:
                     platform=msg.metadata.get("platform") if msg.metadata else None,
                     published_at=published_at
                 )
-                pg_db.insert_clue(clue)
+                await asyncio.to_thread(pg_db.insert_clue, clue)
                 clues_inserted += 1
             except Exception as e:
                 logger.warning(f"Failed to insert clue for {msg.message_id}: {e}")
@@ -331,16 +361,25 @@ class DaemonScheduler:
         from psycopg2 import sql
 
         today = datetime.now().date().isoformat()
-        total_entities = pg_db.get_total_entities_count()
 
-        with pg_db._get_cursor() as cur:
-            cur.execute(sql.SQL("""
-                SELECT risk_label_level1, COUNT(*) as count
-                FROM {}.clues
-                GROUP BY risk_label_level1
-            """).format(sql.Identifier(pg_db.schema)))
-            rows = cur.fetchall()
-            distribution = [{"risk_label_level1": row["risk_label_level1"], "count": row["count"]} for row in rows]
+        def _fetch_metrics():
+            # Sync DB ops wrapped in a function for asyncio.to_thread.
+            # P0-2 (2026-06-07): psycopg2 is sync, calling it directly
+            # from an async loop would block the entire event loop.
+            total_entities = pg_db.get_total_entities_count()
+            with pg_db._get_cursor() as cur:
+                cur.execute(sql.SQL("""
+                    SELECT risk_label_level1, COUNT(*) as count
+                    FROM {}.clues
+                    GROUP BY risk_label_level1
+                """).format(sql.Identifier(pg_db.schema)))
+                rows = cur.fetchall()
+                return total_entities, [
+                    {"risk_label_level1": row["risk_label_level1"], "count": row["count"]}
+                    for row in rows
+                ]
+
+        total_entities, distribution = await asyncio.to_thread(_fetch_metrics)
 
         metrics = Metrics(
             date=today,
@@ -353,7 +392,7 @@ class DaemonScheduler:
             classification_distribution=distribution,
             channel_status=[]
         )
-        pg_db.upsert_metrics(metrics)
+        await asyncio.to_thread(pg_db.upsert_metrics, metrics)
 
         # Enqueue deep-routed messages for the background LightRAG worker.
         # Clue insertion is now COMPLETE; deep channel happens asynchronously.
@@ -554,26 +593,91 @@ class DaemonScheduler:
             except Exception as e:
                 logger.warning(f"Seed word promotion failed for {candidate.word}: {e}")
 
+
+    async def _send_to_dlq(self, topic: str, batch: Dict, error_msg: str) -> int:
+        """Write a failed Kafka batch to the dead letter queue.
+
+        Called by _kafka_consumer_loop when _process_messages raises.
+        Each message in the batch is recorded individually so an
+        operator can inspect/replay later via DLQ_REPLAY_TOOL.
+
+        Note: psycopg2 is sync, so we wrap the DB write in to_thread
+        to avoid blocking the asyncio event loop. This is a P0-2
+        fixup (per the plan) but kept in this helper to keep the
+        commit logic atomic with the DLQ write.
+        """
+        from services.database import PostgreSQLService
+        pg_db = PostgreSQLService.get_instance()
+        written = 0
+        # batch is Dict[TopicPartition, List[ConsumerRecord]] from
+        # aiokafka; iterate topics/partitions/records.
+        for tp, records in batch.items():
+            for record in records:
+                payload = record.value if isinstance(record.value, dict) else {"raw": str(record.value)}
+                msg_id = None
+                if isinstance(payload, dict):
+                    msg_id = payload.get("message_id")
+                try:
+                    await asyncio.to_thread(
+                        pg_db.insert_dlq_message,
+                        topic=topic,
+                        partition_id=tp.partition,
+                        kafka_offset=record.offset,
+                        message_id=msg_id,
+                        payload=payload,
+                        error_msg=error_msg,
+                    )
+                    written += 1
+                except Exception as e:
+                    logger.error(
+                        f"DLQ write failed for offset={record.offset}: {e}"
+                    )
+        logger.warning(
+            f"DLQ: wrote {written}/{sum(len(r) for r in batch.values())} "
+            f"messages from failed batch"
+        )
+        return written
+
     async def _error_book_loop(self):
-        """Sample and judge high-confidence clues daily at 2 AM."""
-        check_hour = self.config.get('daemon', {}).get('error_book_check_hour', 2)
-        logger.info(f"Error book loop started (check hour: {check_hour}:00)")
+        """Sample and judge high-confidence clues.
+
+        P4 (2026-06-07): threshold trigger replaces the legacy
+        "daily at 2 AM" pattern. Polls every 5min; if ≥500 new
+        high-confidence clues accumulated in the last hour, run
+        1% sampling + LLM judging immediately. Otherwise idle wait.
+        With 24h ~42k new clues and ~75% high-conf (~32k), this
+        fires ~64 times/day (vs 1/day before) — much more responsive
+        to embedding classifier drift.
+        """
+        check_interval = 300  # 5 min
+        min_new_high_conf = 500
+        logger.info(
+            f"Error book loop started (check_interval={check_interval}s, "
+            f"threshold={min_new_high_conf} new high-conf clues)"
+        )
 
         while self._running:
-            now = datetime.now()
-            next_run = now.replace(hour=check_hour, minute=0, second=0, microsecond=0)
-            if now.hour >= check_hour:
-                next_run += timedelta(days=1)
-
-            sleep_seconds = (next_run - now).total_seconds()
-            logger.info(f"Error book sampling scheduled in {sleep_seconds/3600:.1f} hours")
-
-            await asyncio.sleep(sleep_seconds)
-
+            await asyncio.sleep(check_interval)
             if not self._running:
                 break
 
             try:
+                from services.database import PostgreSQLService
+                pg_db = PostgreSQLService.get_instance()
+                # P0-2: to_thread the DB count
+                new_count = await asyncio.to_thread(
+                    pg_db.count_recent_high_confidence_clues, 1
+                )
+                if new_count < min_new_high_conf:
+                    logger.debug(
+                        f"Error book: {new_count} new high-conf < "
+                        f"threshold {min_new_high_conf}, idle wait"
+                    )
+                    continue
+                logger.info(
+                    f"Error book: {new_count} new high-conf ≥ "
+                    f"threshold {min_new_high_conf}, triggering sampling"
+                )
                 from services.error_book_sampler import ErrorBookSampler
                 sampler = ErrorBookSampler(self.config)
                 count = await sampler.sample_and_judge()
@@ -603,39 +707,94 @@ class DaemonScheduler:
                 logger.error(f"Retrain check error: {e}", exc_info=True)
 
     async def _slang_to_rule_bridge_loop(self):
-        """Phase 2.2 (FR-EVO-06): daily slang->rule bridge evaluation.
+        """Phase 2.2 (FR-EVO-06): slang->rule bridge evaluation.
 
-        Evaluates CONFIRMED slangs as Stage 1 rule candidates with LLM
-        + Embedding dual-validation. Persists accepted rules to
-        antiblack.dynamic_rules, with hit-rate-based auto-rollback.
+        P5 (2026-06-07): threshold trigger. Polls every 5min; if
+        ≥3 new CONFIRMED slangs accumulated since the last run,
+        evaluate them as Stage 1 rule candidates. Otherwise idle
+        wait. With current CONFIRMED growth rate (13 total, ~1/day),
+        this fires once every 1-2 days — same as the old 24h fixed
+        schedule, but doesn't miss a burst if slang learning picks up.
         """
-        interval_hours = self.config.get('slang_to_rule_bridge', {}).get('loop_interval_hours', 24)
-        interval_seconds = interval_hours * 3600
-        logger.info(f"Slang-to-rule bridge loop started (interval: {interval_hours}h)")
-
-        # First run after a small delay so the daemon has settled
-        await asyncio.sleep(60)
+        check_interval = 300  # 5 min
+        min_new_confirmed = 3
+        # CR-fix (2026-06-07): bootstrap failure used to leave
+        # last_confirmed_count=0, causing the first poll to fire on
+        # the entire accumulated history. Now we retry bootstrap each
+        # tick (5min) until it succeeds, and skip the work-block on
+        # ticks where bootstrap still hasn't landed.
+        last_confirmed_count = None
+        for _attempt in range(3):  # bounded retry, ~3s ceiling
+            try:
+                from services.database import PostgreSQLService
+                pg_db = PostgreSQLService.get_instance()
+                last_confirmed_count = await asyncio.to_thread(
+                    pg_db.count_slang_status, 'CONFIRMED'
+                )
+                break
+            except Exception as e:
+                logger.warning(f"Slang->rule bridge bootstrap retry: {e}")
+                await asyncio.sleep(1)
+        if last_confirmed_count is None:
+            logger.error(
+                "Slang->rule bridge bootstrap failed after 3 retries; "
+                "loop will idle until next tick"
+            )
+        else:
+            logger.info(
+                f"Slang-to-rule bridge loop started "
+                f"(check_interval={check_interval}s, threshold={min_new_confirmed} "
+                f"new CONFIRMED, baseline={last_confirmed_count})"
+            )
 
         while self._running:
-            await asyncio.sleep(interval_seconds)
-
+            await asyncio.sleep(check_interval)
             if not self._running:
                 break
 
             try:
+                from services.database import PostgreSQLService
+                pg_db = PostgreSQLService.get_instance()
+                cur_count = await asyncio.to_thread(
+                    pg_db.count_slang_status, 'CONFIRMED'
+                )
+                # CR-fix (2026-06-07): if bootstrap never landed, we
+                # still don't have a baseline. Skip the work tick and
+                # try the count again next tick (it will become the
+                # baseline on its own then).
+                if last_confirmed_count is None:
+                    last_confirmed_count = cur_count
+                    logger.info(
+                        f"Slang->rule bridge: bootstrap baseline now "
+                        f"set to {cur_count}, skipping evaluation this tick"
+                    )
+                    continue
+                delta = cur_count - last_confirmed_count
+                if delta < min_new_confirmed:
+                    logger.debug(
+                        f"Slang->rule bridge: {delta} new CONFIRMED < "
+                        f"threshold {min_new_confirmed}, idle wait"
+                    )
+                    continue
+                logger.info(
+                    f"Slang->rule bridge: {delta} new CONFIRMED ≥ "
+                    f"threshold {min_new_confirmed}, evaluating"
+                )
                 from pipeline.slang_to_rule_bridge import SlangToRuleBridge
                 bridge = SlangToRuleBridge(config=self.config)
                 results = await bridge.evaluate_batch()
-                if results:
-                    accepted = sum(1 for r in results if r.get('status') == 'accepted')
-                    rejected = sum(1 for r in results if r.get('status') == 'rejected')
-                    logger.info(
-                        f"Slang->rule bridge: evaluated {len(results)} slangs "
-                        f"({accepted} accepted, {rejected} rejected)"
-                    )
+                accepted = sum(1 for r in results if r.get('status') == 'accepted')
+                rejected = sum(1 for r in results if r.get('status') == 'rejected')
+                logger.info(
+                    f"Slang->rule bridge: evaluated {len(results)} slangs "
+                    f"({accepted} accepted, {rejected} rejected)"
+                )
+                last_confirmed_count = cur_count
                 # Periodic rollback: disable rules with hit_rate < threshold
                 try:
-                    disabled = bridge.rollback_low_quality_rules()
+                    disabled = await asyncio.to_thread(
+                        bridge.rollback_low_quality_rules
+                    )
                     if disabled:
                         logger.info(f"Slang->rule bridge: auto-disabled {disabled} low-quality rules")
                 except Exception as e:

@@ -380,65 +380,129 @@ class UnknownDiscovery:
         return None
 
     async def run(self, lookback_days: int = 7) -> List[dict]:
-        """Run end-to-end discovery. Returns a list of accepted proposals."""
+        """Run end-to-end discovery. Returns a list of accepted proposals.
+
+        P3-1 (2026-06-07): batched processing. Previously ran 5-10k samples
+        in one go (UMAP+HDBSCAN took 20-40 min, blocking the daemon).
+        Now chunks at `batch_size` (default 5000) with asyncio.sleep(0)
+        between batches to yield to the event loop.
+
+        P3-2 (2026-06-07): UMAP recalibration. First batch uses
+        fit_transform; subsequent batches within the same run use
+        transform only. The `umap_unknown_discovery.pkl` model
+        persists to disk, so across runs the topology is stable.
+        Daily / per-N-batches full recalibration is handled by
+        daemon_scheduler (separate concern).
+        """
         samples = self.fetch_unknown_samples(lookback_days=lookback_days)
         logger.info(f"[discovery] fetched {len(samples)} unknown samples")
         if len(samples) < self.hdbscan_min_cluster_size:
             logger.info("[discovery] not enough samples to cluster")
             return []
 
-        texts = [s['cleaned_text'] for s in samples]
-        X = self.embed_texts(texts)
-        X_low, _ = self.reduce_umap(X, fit=True)
-        cluster_labels, _ = self.cluster_hdbscan(X_low)
+        batch_size = int(self.ud_cfg.get('run_batch_size', 5000))
+        accepted: List[dict] = []
+        umap_model = None
 
-        # For each non-noise cluster, run LLM + assertions + dedup
-        accepted = []
+        # P3-2: First batch fits UMAP, rest use transform.
+        # P3-1: Process in chunks so a 50k-sample run doesn't
+        # hold the event loop for 20+ minutes.
+        for batch_start in range(0, len(samples), batch_size):
+            batch_end = min(batch_start + batch_size, len(samples))
+            batch_samples = samples[batch_start:batch_end]
+            logger.info(
+                f"[discovery] processing batch {batch_start}-{batch_end} "
+                f"({len(batch_samples)} samples) of {len(samples)} total"
+            )
+            batch_accepted, umap_model = await self._process_one_batch(
+                batch_samples, fit_umap=(batch_start == 0), umap_model=umap_model
+            )
+            accepted.extend(batch_accepted)
+            # Yield to event loop so other loops (Kafka consumer, slang
+            # evolution, etc.) get a turn. Keeps the daemon responsive
+            # during the multi-minute discovery run.
+            await asyncio.sleep(0)
+        return accepted
+
+    async def _process_one_batch(
+        self, samples: List[dict], fit_umap: bool, umap_model
+    ) -> tuple:
+        """Run a single batch through embed → UMAP → HDBSCAN → LLM naming.
+
+        Returns (accepted_proposals, umap_model_for_next_batch).
+        """
+        texts = [s['cleaned_text'] for s in samples]
+        X = await asyncio.to_thread(self.embed_texts, texts)
+        X_low, umap_model = await asyncio.to_thread(
+            self.reduce_umap, X, fit_umap
+        )
+        cluster_labels, _ = await asyncio.to_thread(
+            self.cluster_hdbscan, X_low
+        )
+
+        # Build list of cluster descriptors to process
         unique_labels = set(cluster_labels.tolist()) - {-1}
+        cluster_descs = []
         for cid in unique_labels:
             cluster_idx = np.where(cluster_labels == cid)[0]
             if len(cluster_idx) < self.min_cluster_size_for_proposal:
-                logger.info(f"[discovery] cluster {cid} too small ({len(cluster_idx)} < {self.min_cluster_size_for_proposal}), skip")
                 continue
             sample_texts = self.centroid_sample(X_low, cluster_idx, texts, self.top_k)
-            cluster_mean = X[cluster_idx].mean(axis=0)  # 1024-dim for storage
+            cluster_mean = X[cluster_idx].mean(axis=0)
+            cluster_descs.append((cid, cluster_idx, sample_texts, cluster_mean))
 
-            # 1. LLM names the cluster
+        # LLM naming + assertions + dedup + write — gather with
+        # P0-3 LLMClient._semaphore (global cap 4 concurrent).
+        # One gather() over all clusters so they all run in parallel
+        # within the semaphore limit.
+        async def _process_one_cluster(cid, cluster_idx, sample_texts, cluster_mean):
             llm_resp = await self.name_cluster_with_llm(sample_texts, len(cluster_idx))
             if llm_resp is None:
-                continue
-            # 2. Code-level assertions
+                return None
             ok, reason = self.code_level_assertions(llm_resp)
             if not ok:
                 logger.info(f"[discovery] cluster {cid} rejected: {reason}")
-                continue
-            # 3. Dedup against existing taxonomy
-            is_dup, similar = self.is_duplicate_of_existing(
+                return None
+            is_dup, similar = await asyncio.to_thread(
+                self.is_duplicate_of_existing,
                 llm_resp.get("proposed_level1", ""),
                 llm_resp.get("proposed_level2", ""),
             )
             if is_dup:
                 logger.info(f"[discovery] cluster {cid} dedup-merged into {similar!r}")
-                continue
-            # 4. Dedup against candidate pool
-            pool_dup = self.find_duplicate_in_pool(llm_resp.get("proposed_level2", ""))
+                return None
+            pool_dup = await asyncio.to_thread(
+                self.find_duplicate_in_pool, llm_resp.get("proposed_level2", "")
+            )
             if pool_dup:
                 logger.info(f"[discovery] cluster {cid} merged into pool proposal {pool_dup['proposal_id']}")
-                continue
-            # 5. Write proposal
-            proposal_id = self.write_proposal(
+                return None
+            proposal_id = await asyncio.to_thread(
+                self.write_proposal,
                 cluster_id=str(cid),
                 cluster_size=len(cluster_idx),
                 sample_texts=sample_texts,
                 cluster_mean_emb=cluster_mean,
                 llm_resp=llm_resp,
             )
-            accepted.append({
+            return {
                 "proposal_id": proposal_id,
                 "cluster_id": str(cid),
                 "size": len(cluster_idx),
                 "level1": llm_resp.get("proposed_level1"),
                 "level2": llm_resp.get("proposed_level2"),
                 "confidence": llm_resp.get("confidence"),
-            })
-        return accepted
+            }
+
+        results = await asyncio.gather(
+            *(_process_one_cluster(*d) for d in cluster_descs),
+            return_exceptions=True,
+        )
+        accepted = []
+        for r in results:
+            if isinstance(r, Exception):
+                logger.error(f"[discovery] cluster processing failed: {r}")
+                continue
+            if r is not None:
+                accepted.append(r)
+        return accepted, umap_model

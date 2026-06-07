@@ -527,6 +527,7 @@ class AutoEvolution:
     retrain_status: RetrainStatus = RetrainStatus.IDLE
     retrain_trigger_threshold: int = 2000
     last_retrain_at: Optional[datetime] = None
+    last_retrain_silver_total: Optional[int] = None  # P2 2026-06-07: for delta trigger
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -538,6 +539,7 @@ class AutoEvolution:
             "retrain_status": self.retrain_status.value if isinstance(self.retrain_status, RetrainStatus) else self.retrain_status,
             "retrain_trigger_threshold": self.retrain_trigger_threshold,
             "last_retrain_at": self.last_retrain_at.isoformat() if self.last_retrain_at else None,
+            "last_retrain_silver_total": self.last_retrain_silver_total,
             "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at
         }
 

@@ -33,7 +33,7 @@ import time
 import json
 import logging
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,29 @@ class LLMClient:
 
     Includes `classify_batch()` for sending 5-10 texts in a single LLM call
     (5-10x faster than per-text calls). Used by Classifier.classify_batch.
+
+    P0-3 (2026-06-07): Added a process-wide semaphore that caps total
+    in-flight LLM calls across all daemons/threads. Without this, the
+    slang 4-concurrent loop + LightRAG 3-worker + unknown_discovery
+    triggered together would each call LLMClient independently and
+    collectively exceed the provider's TPM/RPM limit. The semaphore
+    is process-global (ClassVar) so all clients share the same pool.
     """
+
+    # Process-wide rate-limit gate. 4 is conservative for production
+    # providers (MiniMax / Qwen / DashScope typically allow 30-60 RPM
+    # for paid tiers; 4 concurrent * ~15s/call = 16 calls/min leaves
+    # headroom). Override via env LLM_MAX_CONCURRENT.
+    _MAX_CONCURRENT: ClassVar[int] = int(os.environ.get("LLM_MAX_CONCURRENT", "4"))
+    _semaphore: ClassVar[Optional[asyncio.Semaphore]] = None
+
+    @classmethod
+    def _get_semaphore(cls) -> asyncio.Semaphore:
+        # Lazily create on first use, since ClassVar can't be init'd at class
+        # definition time (asyncio primitives need a running event loop).
+        if cls._semaphore is None:
+            cls._semaphore = asyncio.Semaphore(cls._MAX_CONCURRENT)
+        return cls._semaphore
 
     def __init__(
         self,
@@ -113,39 +135,62 @@ class LLMClient:
     async def chat_raw(self, messages: List[Dict[str, str]], **kwargs):
         """Return the full response object (for callers that need tool_calls etc.).
         Raises AllProvidersExhausted if all providers fail.
+
+        P0-3 (2026-06-07): each provider call is wrapped in
+        self._get_semaphore() (process-wide cap) and retries with
+        exponential backoff on RateLimitError. Without the semaphore,
+        slang_evolution (4) + lightrag_workers (3) + unknown_discovery
+        would each enqueue LLM calls independently and blow past
+        provider RPM/TPM limits.
         """
-        from openai import APITimeoutError, APIError
+        from openai import APITimeoutError, APIError, RateLimitError
         last_err: Optional[Exception] = None
         for provider in self.providers:
             if self._is_circuit_open(provider):
                 logger.debug(f"Skipping provider {provider['name']} (circuit open)")
                 continue
             client = self._get_client(provider)
-            try:
-                response = await client.chat.completions.create(
-                    model=provider["model"],
-                    messages=messages,
-                    timeout=self.timeout,
-                    **kwargs,
-                )
-                self._record_success(provider)
-                return response
-            except (APITimeoutError, APIError) as e:
-                self._record_failure(provider, e)
-                logger.warning(
-                    f"LLM provider {provider['name']} failed: {type(e).__name__}: {e}; trying next"
-                )
-                last_err = e
-                continue
-            except Exception as e:
-                # Non-transient error (e.g., 4xx schema error). Don't burn fallbacks
-                # because all fallbacks are likely to fail the same way.
-                self._record_failure(provider, e)
-                logger.error(
-                    f"LLM provider {provider['name']} non-transient error: "
-                    f"{type(e).__name__}: {e}"
-                )
-                raise
+            # P0-3: backoff for THIS provider on rate-limit; with a
+            # circuit-breaker on top so we don't retry a permanently
+            # rate-limited provider forever.
+            for backoff_attempt in range(3):  # 1s, 2s, 4s
+                try:
+                    async with self._get_semaphore():
+                        response = await client.chat.completions.create(
+                            model=provider["model"],
+                            messages=messages,
+                            timeout=self.timeout,
+                            **kwargs,
+                        )
+                    self._record_success(provider)
+                    return response
+                except RateLimitError as e:
+                    wait = 2 ** backoff_attempt
+                    logger.warning(
+                        f"LLM provider {provider['name']} rate-limited "
+                        f"(attempt {backoff_attempt + 1}/3), backing off {wait}s"
+                    )
+                    self._record_failure(provider, e)
+                    last_err = e
+                    await asyncio.sleep(wait)
+                    continue  # retry same provider with longer wait
+                except (APITimeoutError, APIError) as e:
+                    self._record_failure(provider, e)
+                    logger.warning(
+                        f"LLM provider {provider['name']} failed: "
+                        f"{type(e).__name__}: {e}; trying next"
+                    )
+                    last_err = e
+                    break  # advance to next provider, no point retrying timeout
+                except Exception as e:
+                    # Non-transient error (e.g., 4xx schema error). Don't burn fallbacks
+                    # because all fallbacks are likely to fail the same way.
+                    self._record_failure(provider, e)
+                    logger.error(
+                        f"LLM provider {provider['name']} non-transient error: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    raise
         raise AllProvidersExhausted(
             f"All LLM providers failed. Last error: {last_err}"
         )

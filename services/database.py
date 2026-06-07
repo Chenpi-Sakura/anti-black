@@ -39,6 +39,7 @@ class PostgreSQLService:
         self.schema = 'antiblack'
 
         self._conn: Optional[psycopg2.extensions.connection] = None
+        self._pool: Optional[Any] = None  # ThreadedConnectionPool (P0-2 2026-06-07)
         self._connect()
         self._init_schema()
         self._create_tables()
@@ -46,21 +47,185 @@ class PostgreSQLService:
         self.create_telegram_schema_tables()  # Create telegram schema tables
 
     def _connect(self) -> None:
-        """Establish database connection."""
-        self._conn = psycopg2.connect(
+        """Establish database connection.
+
+        2026-06-07 P0-2: use ThreadedConnectionPool instead of a single
+        psycopg2.connect(). Concurrency: min=2 keeps 2 warm, max=20
+        caps concurrent connections (PG default is 100, leaving headroom
+        for other services). autocommit=True preserves the previous
+        semantics so call sites don't need explicit commit/rollback.
+        """
+        from psycopg2 import pool as pg_pool
+        self._pool = pg_pool.ThreadedConnectionPool(
+            minconn=2,
+            maxconn=20,
             host=self.host,
             port=self.port,
             user=self.user,
             password=self.password,
             database=self.database,
-            cursor_factory=RealDictCursor
+            cursor_factory=RealDictCursor,
         )
-        self._conn.autocommit = True
-        logger.info(f"Connected to PostgreSQL {self.host}:{self.port}/{self.database}")
+        # Compatibility: keep self._conn pointing at a working connection
+        # for the few sites that still use it directly (e.g. test code,
+        # the _init_schema bootstrap path). All production code paths
+        # should go through _get_cursor() and the pool.
+        self._conn = self._pool.getconn()
+        # Set autocommit on connections obtained from the pool. P0-2
+        # inherits the legacy autocommit=True semantics so we don't have
+        # to add explicit commit() at every call site.
+        def _configure(conn):
+            conn.autocommit = True
+            return conn
+        self._pool.putconn(_configure(self._conn))
+        logger.info(
+            f"Connected to PostgreSQL {self.host}:{self.port}/{self.database} "
+            f"(ThreadedConnectionPool min=2 max=20)"
+        )
 
     def _get_cursor(self):
-        """Get a new cursor."""
-        return self._conn.cursor()
+        """Get a new cursor (or pooled context).
+
+        2026-06-07 P0-2: borrow from ThreadedConnectionPool. The caller
+        uses this as `with self._get_cursor() as cur: cur.execute(...)`.
+        The connection is auto-returned to the pool on context exit.
+
+        For asyncio callers, wrap calls in asyncio.to_thread() — psycopg2
+        is sync, so a direct call would block the event loop.
+        """
+        if self._pool is None:
+            # Backward-compat path: fall back to legacy single connection.
+            # Only hits during _init_schema before _connect() returns.
+            return self._conn.cursor()
+        return _PooledCursor(self._pool)
+
+
+class _PooledCursor:
+    """Context manager: borrow a pooled connection, yield its cursor, return on exit.
+
+    Used as:
+        with _PooledCursor(pool) as cur:
+            cur.execute(...)
+
+    psycopg2 ThreadedConnectionPool.getconn() returns a connection
+    checked out of the pool; putconn() returns it. We set autocommit=True
+    on each borrowed connection so callers don't need explicit commit().
+    """
+
+    def __init__(self, pg_pool):
+        self._pool = pg_pool
+        self._conn = None
+        self._cur = None
+
+    def __enter__(self):
+        self._conn = self._pool.getconn()
+        try:
+            self._conn.autocommit = True
+        except Exception:
+            pass
+        self._cur = self._conn.cursor()
+        return self._cur
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if self._cur is not None:
+                self._cur.close()
+        finally:
+            if self._conn is not None:
+                self._pool.putconn(self._conn)
+        return False
+
+    def get_last_retrain_silver_total(self) -> Optional[int]:
+        """Return the silver+platinum total snapshot from the last successful
+        retrain. Returns None if no retrain has ever completed (first-time
+        bootstrap case in check_and_trigger).
+
+        P2 (2026-06-07): added for delta-based retrain trigger.
+        """
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT last_retrain_silver_total
+                FROM antiblack.auto_evolution
+                WHERE id = 'status'
+            """))
+            row = cur.fetchone()
+        if row is None or row.get('last_retrain_silver_total') is None:
+            return None
+        return int(row['last_retrain_silver_total'])
+
+    def count_recent_high_confidence_clues(self, hours: int = 1) -> int:
+        """Count high-confidence clues created in the last N hours.
+
+        P4 (2026-06-07): used by daemon's _error_book_loop to threshold-
+        trigger sampling. Default 1h window; 500 new high-conf clues
+        triggers a 1% sample (~5 LLM calls).
+        """
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT COUNT(*) AS cnt
+                FROM antiblack.clues
+                WHERE confidence >= 0.8
+                  AND created_at > NOW() - (%(hours)s || ' hours')::INTERVAL
+            """), {'hours': str(hours)})
+            return int(cur.fetchone()['cnt'])
+
+    def count_slang_status(self, status: str) -> int:
+        """Count slang candidates in a given status (CONFIRMED/REJECTED/...).
+
+        P5 (2026-06-07): used by daemon's _slang_to_rule_bridge_loop to
+        threshold-trigger evaluation when new CONFIRMED slangs accumulate.
+        """
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT COUNT(*) AS cnt FROM antiblack.slang_candidates
+                WHERE status = %(status)s
+            """), {'status': status})
+            return int(cur.fetchone()['cnt'])
+
+    def insert_dlq_message(
+        self,
+        topic: str,
+        partition_id: int,
+        kafka_offset: int,
+        message_id: Optional[str],
+        payload: Dict[str, Any],
+        error_msg: str,
+    ) -> int:
+        """Insert a poison batch into the Kafka dead letter queue.
+
+        Used by daemon's _kafka_consumer_loop when _process_messages
+        raises. Writing to DLQ before commit prevents the same poison
+        batch from being re-consumed indefinitely and surfaces the
+        problem for operators to inspect/replay.
+
+        P0-2 + CR-fix (2026-06-07): the connection comes from the
+        ThreadedConnectionPool with autocommit=True, so the INSERT
+        is already committed by the time __exit__ runs. The
+        self._conn.commit() call that was here before raised
+        ProgrammingError (commit cannot be called in autocommit mode)
+        and was silently swallowed by the caller's broad except —
+        DLQ writes were always lost. Removed.
+        """
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                INSERT INTO antiblack.kafka_dead_letter_queue
+                    (topic, partition_id, kafka_offset, message_id, payload, error_msg)
+                VALUES (%(topic)s, %(partition_id)s, %(kafka_offset)s,
+                        %(message_id)s, %(payload)s, %(error_msg)s)
+                RETURNING id
+            """), {
+                'topic': topic,
+                'partition_id': partition_id,
+                'kafka_offset': kafka_offset,
+                'message_id': message_id,
+                'payload': Json(payload or {}),
+                'error_msg': error_msg,
+            })
+            new_id = cur.fetchone()['id']
+        logger.warning(
+            f"DLQ: wrote message_id={message_id} offset={kafka_offset} id={new_id}"
+        )
+        return new_id
 
     def _init_schema(self) -> None:
         """Create antiblack schema if not exists."""

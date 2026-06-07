@@ -122,6 +122,7 @@ All data entities are dataclasses defined in `models/entities.py`:
 ## Important Notes
 
 - **Git workflow**: Always ask before pushing to remote
+- **Code change review before commit**: 代码改动需要先经过用户的 CR (code review) 才能 commit. 流程: 改动 → 给用户看 diff / 改动概要 → 用户确认 → commit. 不要未经 review 就直接 `git commit`
 - **Docker**: Use `docker compose` (space, not hyphen)
 - **Environment execution**: Use `conda run -n <env> <command>` to run commands in conda environment without activating it
 - **Docker services** run on VM at 192.168.148.128 (MongoDB, Kafka, Neo4j, PostgreSQL, Redis)
@@ -136,6 +137,7 @@ All data entities are dataclasses defined in `models/entities.py`:
 - Always confirm before git push operations
 - Use `docker compose` not `docker-compose`
 - Conda environment: run commands with `conda run -n <env_name> <command>` syntax
+- **Commit 需要先 CR (code review)**: 任何代码改动（包括但不限于 .py / .yaml / .sql / .md 改写）必须先给用户看 diff 或概要，等用户确认后才能 `git commit`。除非用户明确说"直接提交"
 
 ## CDP Mode (Chrome DevTools Protocol)
 
