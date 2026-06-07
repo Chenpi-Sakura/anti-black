@@ -44,7 +44,13 @@ class ErrorBookSampler:
             await self.initialize()
 
         # Sample high-confidence clues
-        samples = self._db.sample_high_confidence_clues(sample_rate)
+        # BUG-FIX (2026-06-07): sample_high_confidence_clues is a
+        # @staticmethod on PostgreSQLService, not an instance method.
+        # Calling self._db.sample_high_confidence_clues(sample_rate)
+        # raised AttributeError because instance doesn't carry the
+        # method. Call via the class instead.
+        from services.database import PostgreSQLService
+        samples = PostgreSQLService.sample_high_confidence_clues(sample_rate)
         if not samples:
             logger.info("No high-confidence samples found for error book sampling")
             return 0
