@@ -207,10 +207,23 @@ class SlangLearner:
                 continue
 
             candidate = self._get_or_create_candidate(word, source_channel)
+            is_newly_created = candidate.occurrence_count == 0
             candidate.occurrence_count += 1
             # Store (message_id, full_text) tuple for independent sample tracking
             candidate.contexts.append((message_id, text))
             candidate.updated_at = datetime.utcnow()
+
+            # BUG-FIX (2026-06-07): previously, _persist_candidate was
+            # only called on STATE TRANSITION. That meant a NEW
+            # candidate sitting in self._candidates with occurrence
+            # count 1 was never written to DB, and a daemon restart
+            # would lose it (the next process_text call would
+            # re-discover the same word and create a fresh in-memory
+            # entry, but contexts and trigger_msg_id would be lost).
+            # Now: persist any newly-created candidate immediately,
+            # then persist again on every state transition below.
+            if is_newly_created:
+                self._persist_candidate(candidate)
 
             # Check state transitions
             old_status = candidate.status
