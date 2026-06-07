@@ -836,6 +836,10 @@ class PostgreSQLService:
                     occurrence_count = EXCLUDED.occurrence_count,
                     status = EXCLUDED.status,
                     inference_count = EXCLUDED.inference_count,
+                    reject_until = EXCLUDED.reject_until,
+                    regex_pattern = EXCLUDED.regex_pattern,
+                    meaning = EXCLUDED.meaning,
+                    source_channel = EXCLUDED.source_channel,
                     updated_at = NOW()
             """).format(sql.Identifier(self.schema)), {
                 'candidate_word': word,
