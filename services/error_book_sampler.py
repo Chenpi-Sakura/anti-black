@@ -43,7 +43,6 @@ class ErrorBookSampler:
         if not self._db:
             await self.initialize()
 
-        # Sample high-confidence clues
         # BUG-FIX (2026-06-07): sample_high_confidence_clues is a
         # @staticmethod on PostgreSQLService, not an instance method.
         # Calling self._db.sample_high_confidence_clues(sample_rate)
@@ -57,20 +56,32 @@ class ErrorBookSampler:
 
         logger.info(f"Error book sampling: {len(samples)} samples collected")
 
+        # BUG-FIX (2026-06-07): normalize labels before comparison AND
+        # before insert. Previous raw string comparison caused two
+        # classes of false readings:
+        #   (a) "账号交易" vs "账号交易 (Account Trading)" — same class
+        #       recorded as an "inconsistency"
+        #   (b) Both stored as separate classes in sklearn's LabelEncoder
+        # Reuse Classifier._normalize_level1_label (single source of truth).
+        from pipeline.classifier import Classifier
+
         judged_count = 0
         for clue in samples:
             try:
                 llm_judgment = await self._llm_judge(clue)
+                llm_label_raw = llm_judgment.get("label", "未知/其他")
+                llm_label = Classifier._normalize_level1_label(llm_label_raw)
+                original_label = Classifier._normalize_level1_label(clue.get("risk_label_level1", ""))
 
-                if llm_judgment != clue.get("risk_label_level1"):
+                if llm_label != original_label:
                     self._db.insert_error_book(
                         clue_id=clue.get("clue_id"),
-                        original_label=clue.get("risk_label_level1"),
-                        llm_label=llm_judgment.get("label"),
+                        original_label=original_label,
+                        llm_label=llm_label,
                         reason=llm_judgment.get("reason", "")
                     )
                     judged_count += 1
-                    logger.info(f"Error book: inconsistency found for clue {clue.get('clue_id')}")
+                    logger.info(f"Error book: inconsistency found for clue {clue.get('clue_id')}: {original_label} -> {llm_label}")
             except Exception as e:
                 logger.error(f"LLM judgment failed for clue {clue.get('clue_id')}: {e}")
 
@@ -94,11 +105,22 @@ class ErrorBookSampler:
                 LIMIT %(limit)s
             """, {'limit': limit})
 
+            # BUG-FIX (2026-06-07): normalize llm_label on read so
+            # sklearn's LabelEncoder gets 5 canonical classes, not the
+            # polluted 7-8 it was getting before. Single source of
+            # truth = Classifier._normalize_level1_label.
+            #
+            # BUG-FIX (2026-06-07): include clue_id in the dict —
+            # the line-123 comprehension [s['clue_id'] for s in samples]
+            # would KeyError without it (pre-existing bug, surfaced by
+            # sub-agent review).
+            from pipeline.classifier import Classifier
             samples = []
             for row in cur.fetchall():
                 samples.append({
+                    'clue_id': row['clue_id'],
                     'text': row['cleaned_text'],
-                    'label': row['llm_label'],
+                    'label': Classifier._normalize_level1_label(row['llm_label']),
                     'sample_weight': 0.5,
                     'label_source': 'error_book'
                 })
@@ -122,22 +144,31 @@ class ErrorBookSampler:
         """
         from models.clients.llm import LLMClient
 
+        # BUG-FIX (2026-06-07): prompt rewritten to require Chinese-only
+        # labels. Previous bilingual list ("账号交易 (Account Trading)")
+        # let the LLM return either form, polluting sklearn's
+        # LabelEncoder with duplicate class names. JSON spec now
+        # explicitly forbids English / parenthetical variants.
         prompt = f"""You are a black-market intelligence classification expert.
 
-Analyze the following clue and classify it into one of these categories:
-- 账号交易 (Account Trading)
-- 诈骗引流 (Fraud Leads)
-- 流量作弊 (Traffic Cheating)
-- 黑产工具 (Black-market Tools)
-- 未知/其他 (Unknown/Other)
+Classify the following clue into EXACTLY ONE of these 5 labels.
+Return the label VERBATIM in Chinese, with NO English, NO parenthetical,
+NO translation. Just the 4-5 character Chinese name.
+
+Labels (return ONE of these exact strings):
+- 账号交易
+- 流量作弊
+- 诈骗引流
+- 黑产工具
+- 未知/其他
 
 Clue text: {clue.get('cleaned_text', '')}
 
-Return JSON:
+Return JSON only, with this exact shape:
 {{
-    "label": "category name",
-    "reason": "classification reason",
-    "confidence": 0.0-1.0
+    "label": "<one of the 5 Chinese labels above, verbatim>",
+    "reason": "<short reason, 1-2 sentences>",
+    "confidence": <0.0-1.0>
 }}"""
 
         logger.info(f"[LLM Call] Triggering Error Book LLM Judge for clue: {clue.get('clue_id')}")
@@ -173,18 +204,41 @@ def extend_postgres_service():
         return
 
     @staticmethod
-    def sample_high_confidence_clues(sample_rate: float = 0.01, limit: int = 100) -> list:
-        """Sample high-confidence clues for error book."""
+    def sample_high_confidence_clues(sample_rate: float = 0.01,
+                                     min_confidence: float = 0.9,
+                                     max_rows: int = 500) -> list:
+        """Sample high-confidence clues for error book.
+
+        BUG-FIX (2026-06-07): sample_rate was a decorative parameter —
+        the SQL used a hardcoded LIMIT 100, so 0.01% and 100% both
+        returned 100 rows. Now `WHERE RANDOM() < sample_rate` does real
+        Bernoulli sampling, capped at max_rows to prevent runaway under
+        burst traffic. At production rate (~32k high-conf/day) × 0.01
+        we expect ~320 candidates/day.
+
+        min_confidence MUST match the trigger threshold in
+        count_recent_high_confidence_clues (services/database.py:188).
+        """
         instance = PostgreSQLService.get_instance()
 
         with instance._get_cursor() as cur:
+            # BUG-FIX (2026-06-07): drop ORDER BY RANDOM() — the
+            # `WHERE RANDOM() < sample_rate` already provides random
+            # selection, so an additional sort on RANDOM() is wasted
+            # work (O(N log N) on 32k confident rows). ORDER BY
+            # confidence DESC gives stable priority without sort cost.
             cur.execute(sql.SQL("""
                 SELECT clue_id, cleaned_text, risk_label_level1, confidence
                 FROM {}.clues
-                WHERE confidence >= 0.9
-                ORDER BY RANDOM()
-                LIMIT %(limit)s
-            """).format(sql.Identifier(instance.schema)), {"limit": limit})
+                WHERE confidence >= %(min_confidence)s
+                  AND RANDOM() < %(sample_rate)s
+                ORDER BY confidence DESC
+                LIMIT %(max_rows)s
+            """).format(sql.Identifier(instance.schema)), {
+                "min_confidence": min_confidence,
+                "sample_rate": sample_rate,
+                "max_rows": max_rows,
+            })
             return cur.fetchall()
 
     @staticmethod

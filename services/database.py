@@ -185,7 +185,7 @@ class PostgreSQLService:
             cur.execute(sql.SQL("""
                 SELECT COUNT(*) AS cnt
                 FROM antiblack.clues
-                WHERE confidence >= 0.8
+                WHERE confidence >= 0.9
                   AND created_at > NOW() - (%(hours)s || ' hours')::INTERVAL
             """), {'hours': str(hours)})
             return int(cur.fetchone()['cnt'])
