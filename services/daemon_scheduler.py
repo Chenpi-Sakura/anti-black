@@ -94,6 +94,20 @@ class DaemonScheduler:
         kafka_servers = self.config.get('kafka', {}).get('bootstrap_servers', 'localhost:9092')
         self.kafka_manager = KafkaManager(bootstrap_servers=kafka_servers, config=self.config)
         await self.kafka_manager.start()
+
+        # BUG-FIX (2026-06-07): sample_high_confidence_clues is defined
+        # in services/error_book_sampler.py but is monkey-patched onto
+        # PostgreSQLService via extend_postgres_service(). Without
+        # this call, _error_book_loop crashes with
+        # 'type object PostgreSQLService has no attribute
+        # sample_high_confidence_clues' on every poll. Hook it here
+        # alongside the other component init calls.
+        try:
+            from services.error_book_sampler import extend_postgres_service
+            extend_postgres_service()
+            logger.info("PostgreSQLService extended with error_book methods")
+        except Exception as e:
+            logger.warning(f"Failed to extend PostgreSQLService: {e}")
         logger.info("Kafka Manager initialized")
 
         # Initialize SlangLearner
