@@ -145,16 +145,36 @@ class SlangLearner:
                                 reject_until = datetime.fromisoformat(reject_until_raw)
                             except ValueError:
                                 reject_until = None
+
+                    # BUG-FIX (2026-06-08): restore contexts from JSONB column.
+                    # _persist_candidate stores contexts as List[str] (text only,
+                    # msg_id stripped). The validator iterates
+                    #   [text for msg_id, text in candidate.contexts
+                    #    if msg_id != trigger_msg_id]
+                    # so we reconstruct (synthetic_msg_id, text) tuples.
+                    # Synthetic msg_id = hash(text) so identical texts collapse
+                    # (matches process_text's fallback at
+                    # pipeline/slang_learning.py:202-203). Without this fix,
+                    # daemon restart zeros all contexts and validation fails
+                    # with layer='no_contexts' on every revived candidate.
+                    raw_contexts = db_c.get('contexts') or []
+                    source_channel = db_c.get('source_channel') or 'unknown'
+                    restored_contexts = [
+                        (f"{hash(text)}_{source_channel}", text)
+                        for text in raw_contexts
+                        if isinstance(text, str) and text
+                    ]
+
                     self._candidates[word] = SlangCandidate(
                         word=word,
-                        contexts=[],  # Contexts not restored, just state
+                        contexts=restored_contexts,
                         occurrence_count=db_c.get('occurrence_count', 0),
                         status=db_c.get('status', 'NEW'),
                         inference_count=db_c.get('inference_count', 0),
                         reject_until=reject_until,
                         regex_pattern=db_c.get('regex_pattern'),
                         meaning=db_c.get('meaning'),
-                        source_channel=db_c.get('source_channel')
+                        source_channel=source_channel
                     )
 
             if self._candidates:
