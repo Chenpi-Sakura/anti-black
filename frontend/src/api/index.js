@@ -34,7 +34,9 @@ export const entityApi = {
 // Feedback APIs
 export const feedbackApi = {
   submit: (data) =>
-    api.post('/feedback', data)
+    api.post('/feedback', data),
+  list: (params) =>
+    api.get('/feedback', { params })
 }
 
 // System APIs
