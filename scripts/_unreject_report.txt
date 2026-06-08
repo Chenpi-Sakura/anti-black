@@ -1,0 +1,4 @@
+[unreject_slangs] filter: REJECTED in last 24h, occ >= 25, in curated allowlist (29 words)
+[unreject_slangs] would revive 0 candidates:
+[unreject_slangs] left alone (not in allowlist): 2069
+[unreject_slangs] nothing to apply
