@@ -599,18 +599,20 @@ class SlangLearner:
                 logger.error(f"JSON parse failed for {candidate.word}: {e}")
                 return (False, f"json_parse:{e}")
 
-            # 短期硬筛：LLM 自报非黑话 — 仅作为 advisory，不再硬 reject。
-            # BUG-FIX (2026-06-08): 让 60% backtest 当最终仲裁者。
-            # 原因: LLM 在 is_valid_slang=false 时仍然会返回 regex（按
-            # prompt 结构要求），backtest 在真实 contexts 上跑 60% 命中
-            # 测试才是真正区分"真黑话"和"日常短语"的依据。LLM
-            # 自报"非黑话"对真黑话（如"万粉号"/"换绑即可绝不找回"）
-            # 经常误判，因为它只看到 10 个抽样 context，没有完整语境。
-            if not result.get('is_valid_slang', False):
-                logger.info(
-                    f"LLM self-reported not-slang (advisory, will still backtest): "
-                    f"{candidate.word}"
-                )
+            # 5. 半跳过策略（2026-06-08）：LLM 判 true 则直接通过，
+            #    但必须先过负例防误杀闸门。
+            #
+            #    策略：
+            #    - LLM is_valid_slang=true  → 跳过 60% 正例命中率要求，
+            #                                   只验证正例应匹配（regex 没写错）
+            #                                   + 负例不应匹配（防宽泛正则误杀）
+            #    - LLM is_valid_slang=false → 保留完整 backtest 兜底
+            #
+            #    核心保底：eliminate_weak_slangs() 在 200 occ +
+            #    <5% 命中率时会召回，但宽泛 regex 可能在召回前
+            #    已造成大量误杀。因此 negative case 检查是硬性
+            #    要求，绝不跳过。
+            llm_says_slang = result.get('is_valid_slang', False)
 
             # 保存 regex_pattern
             candidate.regex_pattern = result.get('regex_pattern')
@@ -622,12 +624,46 @@ class SlangLearner:
 
             if not candidate.regex_pattern:
                 logger.warning(f"LLM returned no regex_pattern for {candidate.word}")
+                # 即使无 regex，LLM 判 slang 且有 meaning 也放行
+                if llm_says_slang and candidate.meaning:
+                    logger.info(f"LLM says slang, has meaning, passing without regex: {candidate.word}")
+                    return (True, "")
                 return (False, "llm_no_regex")
 
             # ---- 验证 LLM 自造的正例（应匹配）/负例（应不匹配） ----
             positive_cases = result.get('test_positive_cases', [])
             negative_cases = result.get('test_negative_cases', [])
             timeout_s = self.elimination['backtest_timeout_seconds']
+
+            # 正例检查：regex 必须能匹配至少 1 个 LLM 自造的正例
+            if positive_cases:
+                pos_matched = 0
+                for pos_case in positive_cases:
+                    if self._safe_regex_search(candidate.regex_pattern, pos_case, timeout_s) is not None:
+                        pos_matched += 1
+                if pos_matched == 0:
+                    logger.warning(f"All positive cases unmatched for {candidate.word}")
+                    return (False, "pos_case_all_miss")
+
+            # 负例检查：绝不放行（无论 LLM 判 slang 或 not-slang）
+            # 这是防宽泛 regex 误杀的最后防线
+            for neg_case in negative_cases:
+                if self._safe_regex_search(candidate.regex_pattern, neg_case, timeout_s) is not None:
+                    logger.warning(f"Negative case matched (should not): {neg_case}")
+                    return (False, f"neg_case_hit:{neg_case[:40]}")
+
+            logger.info(f"LLM self-test passed for {candidate.word} -> {candidate.meaning}")
+
+            # LLM 自报=true：跳过正例命中率要求和 backtest，直接通过
+            if llm_says_slang:
+                logger.info(f"LLM confirmed slang: {candidate.word} -> {candidate.meaning}")
+                return (True, "")
+
+            # LLM 自报=false 时才走完整 backtest（advisory 兜底）
+            logger.info(
+                f"LLM self-reported not-slang (advisory, will still backtest): "
+                f"{candidate.word}"
+            )
 
             for pos_case in positive_cases:
                 if self._safe_regex_search(candidate.regex_pattern, pos_case, timeout_s) is None:
