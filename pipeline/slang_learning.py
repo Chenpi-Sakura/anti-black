@@ -889,6 +889,17 @@ class SlangLearner:
                     # 持久化 REJECTED 状态 + reject_until，保证 daemon
                     # 重启后 _should_skip 仍能识别沉默期。
                     self._persist_candidate(candidate)
+                    # 同步删除 slang_mappings 记录，确保爬虫不再使用
+                    # 被 LLM 否定为黑产的词作为采集关键词。
+                    # 注意：预设种子词也有 mapping 记录，必须一并清除。
+                    db_del = self._db_service
+                    if db_del is None:
+                        from services.database import PostgreSQLService
+                        db_del = PostgreSQLService.get_instance()
+                    try:
+                        db_del.delete_slang_mappings([candidate.word])
+                    except Exception as e:
+                        logger.error(f"Failed to delete slang_mapping for {candidate.word}: {e}")
                     logger.info(
                         f"REJECTED slang: {candidate.word} (silenced until {candidate.reject_until})"
                     )

@@ -809,6 +809,17 @@ class PostgreSQLService:
                     sql.Identifier(self.schema)))
             return cur.fetchall()
 
+    def delete_slang_mappings(self, slang_raw_list: List[str]) -> None:
+        """Delete slang mappings by raw terms (no-op if empty)."""
+        if not slang_raw_list:
+            return
+        placeholders = ','.join(['%s'] * len(slang_raw_list))
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL(f"""
+                DELETE FROM {self.schema}.slang_mappings
+                WHERE slang_raw IN ({placeholders})
+            """), slang_raw_list)
+
     # ========== SlangCandidate Operations ==========
 
     def upsert_slang_candidate(self, candidate: SlangCandidate) -> str:
