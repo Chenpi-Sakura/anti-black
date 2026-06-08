@@ -204,7 +204,7 @@ slang_learning:
   thresholds:
     new_to_observed: 10      # NEW -> OBSERVED
     observed_to_likely: 20    # OBSERVED -> LIKELY
-    likely_to_confirmed: 30   # LIKELY -> CONFIRMED (lowered 50→30; 2026-06-08 — 99% of real slangs stuck at 20-29 cannot reach the 50-gate)
+    likely_to_confirmed: 25   # LIKELY -> CONFIRMED (50→30→25; 2026-06-08 — top LIKELY real slangs stuck at 20-28 need lower gate to enter LLM validation)
     stable_count: 500         # CONFIRMED -> STABLE
   # Reject settings
   reject:
