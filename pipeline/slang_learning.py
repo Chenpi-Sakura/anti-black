@@ -842,7 +842,7 @@ class SlangLearner:
                 candidate.status = 'CONFIRMED'
                 self._known_words.add(candidate.word)
                 self._persist_candidate(candidate)
-                confirmado.append(candidate)
+                confirmed.append(candidate)
                 logger.info(f"CONFIRMED slang: {candidate.word} -> {candidate.meaning}")
             else:
                 # Layer = first segment of "layer:details" reason string
