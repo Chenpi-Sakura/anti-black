@@ -55,8 +55,26 @@
   --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
   --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.06);
 
-  /* Font Families */
-  --font-serif: "Playfair Display", "Source Han Serif CN", "Noto Serif SC", Georgia, serif;
-  --font-sans: "Crimson Text", "Source Han Serif CN", "Noto Serif SC", serif;
-  --font-mono: "JetBrains Mono", Consolas, monospace;
+  /* Font Families
+     --font-serif: headings + body text (serif feel)
+     --font-sans:  body (same as serif — we want serif everywhere; kept separate for future-proofing)
+     --font-mono:  code blocks
+
+     Chinese serif fonts need to lead the fallback chain so Element Plus's
+     default sans-serif doesn't override us via --el-font-family. */
+  --font-serif: "Source Han Serif CN", "Noto Serif SC", "Songti SC", "SimSun", "Playfair Display", Georgia, serif;
+  --font-sans:  "Source Han Serif CN", "Noto Serif SC", "Songti SC", "SimSun", "Crimson Text", "Playfair Display", Georgia, serif;
+  --font-mono:  "JetBrains Mono", "Source Code Pro", Consolas, monospace;
+
+  /* Base font size — bumped from 14px to 15px for better readability */
+  --font-size-base: 15px;
+  --font-size-sm: 13px;
+  --font-size-md: 15px;
+  --font-size-lg: 17px;
+  --font-size-xl: 19px;
+  --font-size-xxl: 22px;
+
+  /* Element Plus typography override — use our serif font stack */
+  --el-font-family: var(--font-sans);
+  --el-font-size-base: var(--font-size-base);
 }

@@ -1,3 +1,10 @@
+html {
+  font-size: var(--font-size-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -6,9 +13,10 @@
 
 body {
   font-family: var(--font-sans);
+  font-size: var(--font-size-base);
   background-color: var(--color-background);
   color: var(--color-text-primary);
-  line-height: 1.6;
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -17,11 +25,13 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-serif);
   font-weight: 500;
   color: var(--color-text-primary);
+  letter-spacing: 0.01em;
 }
 
-h1 { font-size: 28px; }
-h2 { font-size: 20px; }
-h3 { font-size: 16px; }
+h1 { font-size: 24px; }
+h2 { font-size: 21px; }
+h3 { font-size: 17px; }
+h4 { font-size: 15px; }
 
 code, pre {
   font-family: var(--font-mono);
@@ -84,6 +94,49 @@ code, pre {
 .card:hover {
   box-shadow: var(--shadow-hover);
   transform: translateY(-2px);
+}
+
+/* Element Plus — force serif font + our base size everywhere */
+.el-button,
+.el-input__inner,
+.el-select,
+.el-textarea__inner,
+.el-table,
+.el-table tr,
+.el-table td,
+.el-table th,
+.el-pagination,
+.el-pagination .el-pager li,
+.el-pagination .btn-prev,
+.el-pagination .btn-next,
+.el-form-item__label,
+.el-tag,
+.el-empty__description p,
+.el-dialog,
+.el-message,
+.el-notification {
+  font-family: var(--font-sans) !important;
+}
+
+.el-button,
+.el-pagination,
+.el-input__inner,
+.el-textarea__inner,
+.el-tag,
+.el-table,
+.el-table .cell {
+  font-size: var(--font-size-base) !important;
+}
+
+.el-button--small,
+.el-pagination .el-pager li,
+.el-pagination .btn-prev,
+.el-pagination .btn-next,
+.el-pagination .el-jumper input,
+.el-table--small,
+.el-tag--small,
+.el-form-item--small .el-form-item__label {
+  font-size: var(--font-size-sm) !important;
 }
 
 /* Button overrides for Element Plus */

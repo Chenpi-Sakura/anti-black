@@ -5,30 +5,31 @@
         <span class="logo">::</span>
         <h1 class="system-title">黑灰产情报分析 Agent</h1>
       </div>
+
+      <nav class="app-nav">
+        <router-link to="/" class="nav-item">
+          <el-icon><Monitor /></el-icon>
+          <span>监控概览</span>
+        </router-link>
+        <router-link to="/query" class="nav-item">
+          <el-icon><Search /></el-icon>
+          <span>情报查询</span>
+        </router-link>
+        <router-link to="/clues" class="nav-item">
+          <el-icon><Document /></el-icon>
+          <span>线索列表</span>
+        </router-link>
+        <router-link to="/feedback" class="nav-item">
+          <el-icon><Edit /></el-icon>
+          <span>反馈管理</span>
+        </router-link>
+      </nav>
+
       <div class="header-right">
         <span :class="['status-indicator', statusClass]"></span>
         <span class="status-text">{{ statusText }}</span>
       </div>
     </header>
-
-    <nav class="app-nav">
-      <router-link to="/" class="nav-item">
-        <el-icon><Monitor /></el-icon>
-        <span>监控概览</span>
-      </router-link>
-      <router-link to="/query" class="nav-item">
-        <el-icon><Search /></el-icon>
-        <span>情报查询</span>
-      </router-link>
-      <router-link to="/clues" class="nav-item">
-        <el-icon><Document /></el-icon>
-        <span>线索列表</span>
-      </router-link>
-      <router-link to="/feedback" class="nav-item">
-        <el-icon><Edit /></el-icon>
-        <span>反馈管理</span>
-      </router-link>
-    </nav>
 
     <main class="app-main">
       <router-view />
@@ -78,19 +79,21 @@ onMounted(async () => {
 }
 
 .app-header {
-  height: 64px;
+  height: 56px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--spacing-lg);
   padding: 0 var(--spacing-lg);
   background: var(--color-surface);
   border-bottom: var(--border-thin) solid var(--color-primary-subtle);
+  flex-shrink: 0;
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  flex-shrink: 0;
 }
 
 .logo {
@@ -100,14 +103,46 @@ onMounted(async () => {
 }
 
 .system-title {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 500;
+  white-space: nowrap;
+}
+
+.app-nav {
+  display: flex;
+  gap: var(--spacing-xs);
+  flex: 1;
+  margin-left: var(--spacing-lg);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xxs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  border-radius: var(--radius-sm);
+  transition: all var(--duration-normal) var(--ease-out-quint);
+  white-space: nowrap;
+}
+
+.nav-item:hover {
+  color: var(--color-primary);
+  background: var(--color-primary-subtle);
+}
+
+.nav-item.router-link-active {
+  color: var(--color-primary);
+  background: var(--color-primary-light);
 }
 
 .header-right {
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
+  flex-shrink: 0;
 }
 
 .status-indicator {
@@ -133,40 +168,10 @@ onMounted(async () => {
   color: var(--color-text-secondary);
 }
 
-.app-nav {
-  display: flex;
-  gap: var(--spacing-md);
-  padding: var(--spacing-sm) var(--spacing-lg);
-  background: var(--color-surface);
-  border-bottom: var(--border-thin) solid var(--color-divider);
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-xxs);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  color: var(--color-text-secondary);
-  text-decoration: none;
-  font-size: 14px;
-  border-radius: var(--radius-sm);
-  transition: all var(--duration-normal) var(--ease-out-quint);
-}
-
-.nav-item:hover {
-  color: var(--color-primary);
-  background: var(--color-primary-subtle);
-}
-
-.nav-item.router-link-active {
-  color: var(--color-primary);
-  background: var(--color-primary-light);
-}
-
 .app-main {
   flex: 1;
   padding: var(--spacing-sm);
-  overflow: hidden;
+  overflow: auto;
   min-height: 0;
   display: flex;
   flex-direction: column;

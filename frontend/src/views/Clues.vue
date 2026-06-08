@@ -97,26 +97,23 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { clueApi, taxonomyApi, channelApi } from '../api'
+import { useAppStore } from '../stores/app'
 import { CircleCheck, Warning, Location } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
-const clues = ref([])
-const loading = ref(false)
-const total = ref(0)
-const pagination = reactive({
-  page_no: 1,
-  page_size: 10
-})
+const store = useAppStore()
 
-const filters = reactive({
-  risk_label_level1: '',
-  source_channel: '',
-  dateRange: null
-})
+// All list state lives in Pinia so ClueDetail -> back preserves page + filters
+const clues = computed(() => store.clues)
+const total = computed(() => store.cluesPagination.total)
+const pagination = store.cluesPagination  // mutate directly; reactive ref
+const filters = store.cluesFilters        // mutate directly; reactive ref
+
+const loading = ref(false)
 
 // Dynamic dropdown options
 const riskTypeOptions = ref([])
@@ -162,8 +159,12 @@ async function loadClues() {
     const data = res.data?.data
 
     if (data) {
-      clues.value = data.items || []
-      total.value = data.total || 0
+      // Persist to store so back navigation restores the same list
+      store.setClues(data.items || [], {
+        page_no: data.page_no ?? pagination.page_no,
+        page_size: data.page_size ?? pagination.page_size,
+        total: data.total || 0
+      })
     }
 
     if (clues.value.length === 0 && pagination.page_no > 1) {
@@ -219,10 +220,7 @@ async function loadDropdownOptions() {
 }
 
 function resetFilters() {
-  filters.risk_label_level1 = ''
-  filters.source_channel = ''
-  filters.dateRange = null
-  pagination.page_no = 1
+  store.resetCluesFilters()
   loadClues()
 }
 
@@ -237,7 +235,8 @@ function showFeedback(clue, type) {
 
 onMounted(async () => {
   await loadDropdownOptions()
-  loadClues()
+  // Always reload to keep data fresh (page_no + filters preserved via Pinia)
+  await loadClues()
 })
 </script>
 

@@ -137,7 +137,11 @@ const feedbackForm = reactive({
 })
 
 function goBack() {
-  router.back()
+  // Always go to /clues — Pinia store preserves page_no + filters
+  // (router.back() loses state because Clues.vue's pagination/filters were
+  //  component-local before, and even with Pinia, history semantics get
+  //  surprising when the user landed on detail via a deep link.)
+  router.push('/clues')
 }
 
 function getChannelName(channel) {

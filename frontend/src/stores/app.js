@@ -21,6 +21,12 @@ export const useAppStore = defineStore('app', () => {
     page_size: 10,
     total: 0
   })
+  // Clues list filters (preserved across navigation via Pinia)
+  const cluesFilters = ref({
+    risk_label_level1: '',
+    source_channel: '',
+    dateRange: null
+  })
 
   // Entity state
   const currentEntity = ref(null)
@@ -50,6 +56,19 @@ export const useAppStore = defineStore('app', () => {
     currentClue.value = clue
   }
 
+  function setCluesFilters(filters) {
+    cluesFilters.value = { ...cluesFilters.value, ...filters }
+  }
+
+  function resetCluesFilters() {
+    cluesFilters.value = {
+      risk_label_level1: '',
+      source_channel: '',
+      dateRange: null
+    }
+    cluesPagination.value.page_no = 1
+  }
+
   function setEntityProfile(profile) {
     entityProfile.value = profile
   }
@@ -67,6 +86,7 @@ export const useAppStore = defineStore('app', () => {
     clues,
     currentClue,
     cluesPagination,
+    cluesFilters,
     currentEntity,
     entityProfile,
     loading,
@@ -74,6 +94,8 @@ export const useAppStore = defineStore('app', () => {
     setCurrentQuery,
     setClues,
     setCurrentClue,
+    setCluesFilters,
+    resetCluesFilters,
     setEntityProfile,
     setLoading
   }
