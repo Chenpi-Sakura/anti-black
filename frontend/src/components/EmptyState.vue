@@ -13,10 +13,10 @@
 <script setup>
 import { Box } from '@element-plus/icons-vue'
 
-withDefaults(defineProps({
+defineProps({
   description: { type: String, default: '暂无数据' },
   icon: { type: [String, Object], default: () => Box }
-}), {})
+})
 </script>
 
 <style scoped>

@@ -1,63 +1,51 @@
 <template>
   <div class="dashboard">
-    <h2 class="page-title">监控概览</h2>
+    <PageHeader
+      title="监控概览"
+      subtitle="实时系统状态、Token 消耗、分类与渠道分布"
+    />
 
     <div class="metrics-grid">
-      <div class="metric-card">
-        <div class="metric-header">
-          <span class="metric-title">Token 消耗</span>
-        </div>
-        <div class="token-gauge">
+      <BaseMetricCard
+        title="Token 消耗"
+        :value="metrics.token_usage_today"
+        unit=" / 1,000,000"
+        :hint="`${tokenPercentage}% 已使用`"
+      >
+        <template #extra>
           <el-progress
             type="circle"
             :percentage="tokenPercentage"
             :color="tokenColor"
-            :width="120"
+            :width="60"
           />
-        </div>
-        <div class="metric-detail">
-          <span>{{ metrics.token_usage_today?.toLocaleString() || 0 }}</span>
-          <span class="metric-unit">/ {{ dailyLimit.toLocaleString() }}</span>
-        </div>
-      </div>
+        </template>
+      </BaseMetricCard>
 
-      <div class="metric-card">
-        <div class="metric-header">
-          <span class="metric-title">今日处理</span>
-        </div>
-        <div class="metric-value">
-          {{ metrics.messages_processed_today?.toLocaleString() || 0 }}
-        </div>
-        <div class="metric-unit">条消息</div>
-      </div>
+      <BaseMetricCard
+        title="今日处理"
+        :value="metrics.messages_processed_today"
+        unit="条消息"
+        hint="最近 24h"
+      />
 
-      <div class="metric-card">
-        <div class="metric-header">
-          <span class="metric-title">实体总数</span>
-        </div>
-        <div class="metric-value">
-          {{ metrics.total_entities?.toLocaleString() || 0 }}
-        </div>
-        <div class="metric-unit">个实体</div>
-      </div>
+      <BaseMetricCard
+        title="实体总数"
+        :value="metrics.total_entities"
+        unit="个实体"
+        :hint="`关联关系 ${metrics.total_relations || 0} 条`"
+      />
 
-      <div class="metric-card">
-        <div class="metric-header">
-          <span class="metric-title">采集成功率</span>
-        </div>
-        <div class="metric-value">
-          {{ ((metrics.collection_success_rate || 1) * 100).toFixed(1) }}%
-        </div>
-        <div class="metric-detail">
-          <span>后台巡逻: {{ patrolStatus }}</span>
-        </div>
-      </div>
+      <BaseMetricCard
+        title="采集成功率"
+        :value="successRateText"
+        :hint="`后台巡逻: ${patrolStatus}`"
+      />
     </div>
 
     <div class="charts-row">
-      <div class="chart-card">
-        <h3 class="chart-title">分类分布</h3>
-        <div class="chart-content">
+      <BaseCard title="分类分布">
+        <div v-if="classificationDistribution.length > 0" class="distribution-list">
           <div
             v-for="(item, index) in classificationDistribution"
             :key="index"
@@ -65,7 +53,7 @@
           >
             <div class="distribution-label">
               <span>{{ item.risk_label_level1 || item.label }}</span>
-              <span>{{ item.count || item.value }} 条</span>
+              <span class="distribution-count">{{ item.count || item.value || 0 }} 条</span>
             </div>
             <div class="distribution-bar-container">
               <div
@@ -75,11 +63,11 @@
             </div>
           </div>
         </div>
-      </div>
+        <EmptyState v-else description="暂无分类数据" />
+      </BaseCard>
 
-      <div class="chart-card">
-        <h3 class="chart-title">渠道状态</h3>
-        <div class="chart-content">
+      <BaseCard title="渠道状态">
+        <div v-if="channels.length > 0" class="channel-list">
           <div
             v-for="channel in channels"
             :key="channel.platform"
@@ -91,7 +79,8 @@
             </span>
           </div>
         </div>
-      </div>
+        <EmptyState v-else description="暂无渠道数据" />
+      </BaseCard>
     </div>
   </div>
 </template>
@@ -99,6 +88,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { metricsApi, channelApi } from '../api'
+import PageHeader from '../components/PageHeader.vue'
+import BaseMetricCard from '../components/BaseMetricCard.vue'
+import BaseCard from '../components/BaseCard.vue'
+import EmptyState from '../components/EmptyState.vue'
 
 const metrics = ref({})
 const channels = ref([])
@@ -106,15 +99,18 @@ const dailyLimit = 1000000
 
 const tokenPercentage = computed(() => {
   const used = metrics.value.token_usage_today || 0
-  const limit = dailyLimit
-  return Math.min(100, Math.round((used / limit) * 100))
+  return Math.min(100, Math.round((used / dailyLimit) * 100))
 })
 
 const tokenColor = computed(() => {
   const pct = tokenPercentage.value
-  if (pct < 30) return '#2D8B57'
-  if (pct < 70) return '#FCA17D'
-  return '#DA627D'
+  if (pct < 30) return 'var(--color-success)'
+  if (pct < 70) return 'var(--color-warning)'
+  return 'var(--color-error)'
+})
+
+const successRateText = computed(() => {
+  return `${((metrics.value.collection_success_rate || 1) * 100).toFixed(1)}%`
 })
 
 const patrolStatus = computed(() => {
@@ -125,7 +121,7 @@ const patrolStatus = computed(() => {
     'DEGRADED': '降级',
     'STOPPED': '停止'
   }
-  return statusMap[status] || status
+  return statusMap[status] || status || '未知'
 })
 
 const classificationDistribution = computed(() => {
@@ -148,7 +144,7 @@ function getChannelStatusText(status) {
   return map[status] || status
 }
 
-onMounted(async () => {
+async function loadDashboard() {
   try {
     const [metricsRes, channelsRes] = await Promise.all([
       metricsApi.overview(),
@@ -158,7 +154,13 @@ onMounted(async () => {
     channels.value = channelsRes.data?.data || []
   } catch (e) {
     console.error('Failed to load dashboard data:', e)
+    metrics.value = {}
+    channels.value = []
   }
+}
+
+onMounted(() => {
+  loadDashboard()
 })
 </script>
 
@@ -166,10 +168,10 @@ onMounted(async () => {
 .dashboard {
   max-width: 1200px;
   margin: 0 auto;
-}
-
-.page-title {
-  margin-bottom: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .metrics-grid {
@@ -179,79 +181,35 @@ onMounted(async () => {
   margin-bottom: var(--spacing-lg);
 }
 
-.metric-card {
-  background: var(--color-surface);
-  border: var(--border-thin) solid var(--color-primary-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-  text-align: center;
-}
-
-.metric-header {
-  margin-bottom: var(--spacing-sm);
-}
-
-.metric-title {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-}
-
-.token-gauge {
-  display: flex;
-  justify-content: center;
-  margin: var(--spacing-sm) 0;
-}
-
-.metric-value {
-  font-size: 32px;
-  font-weight: 500;
-  color: var(--color-text-primary);
-}
-
-.metric-unit {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.metric-detail {
-  margin-top: var(--spacing-xs);
-  font-size: 13px;
-  color: var(--color-text-secondary);
-}
-
 .charts-row {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: var(--spacing-md);
 }
 
-.chart-card {
-  background: var(--color-surface);
-  border: var(--border-thin) solid var(--color-primary-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-}
-
-.chart-title {
-  font-size: 16px;
-  margin-bottom: var(--spacing-md);
-  padding-bottom: var(--spacing-xs);
-  border-bottom: var(--border-thin) solid var(--color-divider);
-}
-
-.chart-content {
-  min-height: 200px;
+.distribution-list,
+.channel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
 }
 
 .distribution-item {
-  margin-bottom: var(--spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xxs);
 }
 
 .distribution-label {
   display: flex;
   justify-content: space-between;
   font-size: 13px;
-  margin-bottom: var(--spacing-xxs);
+  color: var(--color-text-primary);
+}
+
+.distribution-count {
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 .distribution-bar-container {
@@ -281,12 +239,13 @@ onMounted(async () => {
 
 .channel-name {
   font-size: 14px;
+  color: var(--color-text-primary);
 }
 
 .channel-status {
   font-size: 12px;
   padding: 2px 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .channel-status.healthy {
@@ -302,6 +261,11 @@ onMounted(async () => {
 .channel-status.error {
   background: rgba(218, 98, 125, 0.2);
   color: var(--color-error);
+}
+
+.channel-status.unconfigured {
+  background: var(--color-divider);
+  color: var(--color-text-muted);
 }
 
 @media (max-width: 1024px) {
