@@ -715,11 +715,19 @@ class SlangLearner:
         Three-layer gate (FR-SLANG-03) 仍在 _validate_candidate_with_llm 内
         严格执行, batch_size 增大不降低验证严格度。
         """
-        pending = [c for c in self._candidates.values()
-                   if c.status == 'LIKELY'
-                   and c.occurrence_count >= self.thresholds['likely_to_confirmed']
-                   and c.regex_pattern is None
-                   ][:batch_size]
+        # BUG-FIX (2026-06-08): sort by occurrence_count DESC so the
+        # highest-count candidates (most likely real slangs, including
+        # revived ones) get processed first. Without sort, dict-insertion
+        # order leaves recently-added/revived candidates at the tail of
+        # the queue, where the batch_size=200 slice never reaches them.
+        # LLM is a per-call cost, so highest-count-first maximizes the
+        # value of each validation cycle.
+        eligible = [c for c in self._candidates.values()
+                    if c.status == 'LIKELY'
+                    and c.occurrence_count >= self.thresholds['likely_to_confirmed']
+                    and c.regex_pattern is None]
+        eligible.sort(key=lambda c: c.occurrence_count, reverse=True)
+        pending = eligible[:batch_size]
 
         if not pending:
             return []
