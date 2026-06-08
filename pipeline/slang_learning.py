@@ -498,6 +498,39 @@ class SlangLearner:
         except re.error:
             return None
 
+    async def _collect_contexts_from_clues(self, word: str, limit: int = 30) -> list[str]:
+        """从 clues 表实时收集候选词上下文（替代 JSONB contexts）。
+
+        每次 validation 时按 created_at DESC 取最近 N 条 cleaned_text。
+        源头在 clues 表，不怕 daemon 重启、REJECT/un-reject 循环覆盖。
+
+        statement_timeout=5s 防极端高频词拖慢查询。
+        """
+        from services.database import PostgreSQLService
+        db = PostgreSQLService.get_instance()
+
+        def _fetch() -> list[str]:
+            with db._get_cursor() as cur:
+                try:
+                    cur.execute("SET LOCAL statement_timeout = 5000")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("""
+                        SELECT cleaned_text
+                        FROM antiblack.clues
+                        WHERE cleaned_text LIKE %s
+                          AND cleaned_text IS NOT NULL
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (f"%{word}%", limit))
+                    return [r['cleaned_text'] for r in cur.fetchall()]
+                except Exception as e:
+                    logger.warning(f"Failed to collect contexts for '{word}': {e}")
+                    return []
+
+        return await asyncio.to_thread(_fetch)
+
     async def _validate_candidate_with_llm(self, candidate: SlangCandidate) -> tuple[bool, str]:
         """
         LLM验证候选词（FR-SLANG-03 独立样本原则）：
@@ -517,20 +550,17 @@ class SlangLearner:
 
         logger.info(f"[LLM Call] Triggering Slang Validation for candidate: '{candidate.word}'")
 
-        # FR-SLANG-03: 独立样本原则 - 排除触发验证的消息
-        # contexts 存储的是 (message_id, full_text) 元组
-        trigger_msg_id = candidate.validation_trigger_msg_id
-        independent_contexts = [
-            text for msg_id, text in candidate.contexts
-            if msg_id != trigger_msg_id
-        ]
+        # BUG-FIX (2026-06-08): 从 clues 表实时拉 contexts，不再依赖
+        # candidate.contexts（JSONB 列在 daemon 重启/REJECT 循环中会被
+        # 清空）。每次 validation 取最近 30 条 cleaned_text。
+        all_contexts = await self._collect_contexts_from_clues(candidate.word, limit=30)
+        if not all_contexts:
+            logger.warning(f"No contexts found in clues for '{candidate.word}'")
+            return (False, "no_contexts_in_clues")
 
-        # 取最后 10 条独立上下文发给 LLM（保留前序做 backtest）
-        contexts_sample = independent_contexts[-10:] if independent_contexts else []
-
-        if not contexts_sample:
-            logger.warning(f"No independent contexts for slang candidate: {candidate.word}")
-            return (False, "no_contexts")
+        # 前 10 条发给 LLM 做 prompt context，后面做 backtest
+        contexts_sample = all_contexts[:10]
+        backtest_contexts = all_contexts[10:] if len(all_contexts) > 10 else []
 
         # ---- 三段式 Prompt：人设 + 核心防误判 + 对抗性样本 ----
         prompt = f"""你是一个顶级的【黑产风控情报专家】。本系统聚焦【字节跳动旗下产品的黑灰产业】（抖音 / TikTok / 头条 / 西瓜 / 飞书 / 豆包 / 剪映 等）。你的任务是鉴定给定的词汇是否为字节系黑产（如账号买卖、刷量刷粉、私域引流、规避审查代称）发明的【专属暗语/代称/行话】。
@@ -685,9 +715,8 @@ class SlangLearner:
                     candidate.status = 'OBSERVED'
                     return (False, "meaning_inconsistent")
 
-            # ---- 真实回测：剩余 ~40 条独立上下文 ----
-            # 10 条已发给 LLM；前面留作 held-out backtest 集合
-            backtest_contexts = independent_contexts[:-10] if len(independent_contexts) > 10 else []
+            # ---- 真实回测：剩余 held-out 上下文 ----
+            # backtest_contexts 已在上面从 all_contexts[10:] 分好
             if backtest_contexts:
                 threshold = self.elimination['backtest_threshold']
                 matched = 0
