@@ -478,15 +478,16 @@ class SlangLearner:
         except re.error:
             return None
 
-    async def _validate_candidate_with_llm(self, candidate: SlangCandidate) -> bool:
+    async def _validate_candidate_with_llm(self, candidate: SlangCandidate) -> tuple[bool, str]:
         """
         LLM验证候选词（FR-SLANG-03 独立样本原则）：
 
-        1. 排除触发消息（M1），使用其他独立消息作为正例
-        2. 调用 LLM 生成 regex_pattern + test_cases
-        3. 测试正例应匹配，负例应不匹配
-        4. 在剩余真实语料（held-out backtest set）上做命中率验证
-        5. 返回验证结果
+        Returns:
+            (success, reason): reason is "" on success, "<layer>:<details>"
+            on failure. Layer values: "no_contexts", "json_parse",
+            "llm_self_report", "llm_no_regex", "pos_case_miss",
+            "neg_case_hit", "meaning_inconsistent", "backtest_low",
+            "exception".
 
         所有 `re.search` 均走 `_safe_regex_search`，防止大模型返回的灾难性
         回溯正则卡死事件循环。
@@ -509,7 +510,7 @@ class SlangLearner:
 
         if not contexts_sample:
             logger.warning(f"No independent contexts for slang candidate: {candidate.word}")
-            return False
+            return (False, "no_contexts")
 
         # ---- 三段式 Prompt：人设 + 核心防误判 + 对抗性样本 ----
         prompt = f"""你是一个顶级的【黑产风控情报专家】。本系统聚焦【字节跳动旗下产品的黑灰产业】（抖音 / TikTok / 头条 / 西瓜 / 飞书 / 豆包 / 剪映 等）。你的任务是鉴定给定的词汇是否为字节系黑产（如账号买卖、刷量刷粉、私域引流、规避审查代称）发明的【专属暗语/代称/行话】。
@@ -576,12 +577,12 @@ class SlangLearner:
                 result = json.loads(result_text)
             except json.JSONDecodeError as e:
                 logger.error(f"JSON parse failed for {candidate.word}: {e}")
-                return False
+                return (False, f"json_parse:{e}")
 
             # 短期硬筛：LLM 自报非黑话
             if not result.get('is_valid_slang', False):
                 logger.info(f"LLM self-reported not-slang: {candidate.word}")
-                return False
+                return (False, "llm_self_report:not_valid")
 
             # 保存 regex_pattern
             candidate.regex_pattern = result.get('regex_pattern')
@@ -593,7 +594,7 @@ class SlangLearner:
 
             if not candidate.regex_pattern:
                 logger.warning(f"LLM returned no regex_pattern for {candidate.word}")
-                return False
+                return (False, "llm_no_regex")
 
             # ---- 验证 LLM 自造的正例（应匹配）/负例（应不匹配） ----
             positive_cases = result.get('test_positive_cases', [])
@@ -603,12 +604,12 @@ class SlangLearner:
             for pos_case in positive_cases:
                 if self._safe_regex_search(candidate.regex_pattern, pos_case, timeout_s) is None:
                     logger.warning(f"Positive case not matched: {pos_case[:30]}")
-                    return False
+                    return (False, f"pos_case_miss:{pos_case[:40]}")
 
             for neg_case in negative_cases:
                 if self._safe_regex_search(candidate.regex_pattern, neg_case, timeout_s) is not None:
                     logger.warning(f"Negative case matched (should not): {neg_case}")
-                    return False
+                    return (False, f"neg_case_hit:{neg_case[:40]}")
 
             logger.info(f"LLM self-test passed for {candidate.word} -> {candidate.meaning}")
 
@@ -617,7 +618,7 @@ class SlangLearner:
                 if not self._check_meaning_consistency(candidate.meaning, contexts_sample):
                     logger.info(f"Meaning inconsistent for {candidate.word}, downgrading to OBSERVED")
                     candidate.status = 'OBSERVED'
-                    return False
+                    return (False, "meaning_inconsistent")
 
             # ---- 真实回测：剩余 ~40 条独立上下文 ----
             # 10 条已发给 LLM；前面留作 held-out backtest 集合
@@ -637,19 +638,19 @@ class SlangLearner:
                         f"Backtest failed for '{candidate.word}': "
                         f"{matched}/{len(backtest_contexts)} ({rate:.1%}) < {threshold:.0%}. Rejecting."
                     )
-                    return False
+                    return (False, f"backtest_low:{matched}/{len(backtest_contexts)}={rate:.1%}<{threshold:.0%}")
                 logger.info(
                     f"Backtest passed for '{candidate.word}': "
                     f"{matched}/{len(backtest_contexts)} ({rate:.1%})"
                 )
 
-            return True
+            return (True, "")
 
         except Exception as e:
             logger.error(f"LLM validation failed for {candidate.word}: {e}")
             # 不再降级到 regex_fallback：按计划彻底删除兜底。
             # 失败由 validate_pending_candidates 的 retry 计数接管。
-            return False
+            return (False, f"exception:{type(e).__name__}:{e}")
 
     def _check_meaning_consistency(self, meaning: str, contexts: list[str]) -> bool:
         """
@@ -727,20 +728,28 @@ class SlangLearner:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         confirmed = []
+        layer_failure_counts: Dict[str, int] = {}  # layer -> count (one cycle)
         for r in results:
             if isinstance(r, Exception):
                 # CR #6: sibling failure surfaced as Exception; skip but don't
                 # re-raise so the rest of the batch completes.
                 logger.warning(f"Slang validation task raised: {r}")
                 continue
-            success, candidate = r
+            (success, reason), candidate = r
             if success:
                 candidate.status = 'CONFIRMED'
                 self._known_words.add(candidate.word)
                 self._persist_candidate(candidate)
-                confirmed.append(candidate)
+                confirmado.append(candidate)
                 logger.info(f"CONFIRMED slang: {candidate.word} -> {candidate.meaning}")
             else:
+                # Layer = first segment of "layer:details" reason string
+                layer = reason.split(":", 1)[0] if reason else "unknown"
+                layer_failure_counts[layer] = layer_failure_counts.get(layer, 0) + 1
+                logger.info(
+                    f"Slang validation failed: candidate='{candidate.word}' "
+                    f"layer={layer} reason={reason}"
+                )
                 candidate.inference_count += 1
                 if candidate.inference_count >= self.reject_config['max_retries']:
                     candidate.status = 'REJECTED'
@@ -753,6 +762,10 @@ class SlangLearner:
                     logger.info(
                         f"REJECTED slang: {candidate.word} (silenced until {candidate.reject_until})"
                     )
+
+        if layer_failure_counts:
+            summary = ", ".join(f"{k}={v}" for k, v in sorted(layer_failure_counts.items(), key=lambda x: -x[1]))
+            logger.info(f"Validation layer failure summary (this cycle): {summary}")
 
         return confirmed
 
