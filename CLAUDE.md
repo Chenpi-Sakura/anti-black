@@ -137,7 +137,33 @@ All data entities are dataclasses defined in `models/entities.py`:
 - Always confirm before git push operations
 - Use `docker compose` not `docker-compose`
 - Conda environment: run commands with `conda run -n <env_name> <command>` syntax
-- **Commit 需要先 CR (code review)**: 任何代码改动（包括但不限于 .py / .yaml / .sql / .md 改写）必须先给用户看 diff 或概要，等用户确认后才能 `git commit`。除非用户明确说"直接提交"
+- **用户 review 范围**: 用户**只审 Plan + 大架构变动**（如新增模块 / 重写核心组件 / 跨服务边界改动）。**其余改动**（含 commit 决策）我自主决定。
+- **Commit 闸门**: sub-agent 审查无问题 + 测试通过 → 我可自主 `git commit`（仍展示 diff 做透明，用户可随时中断）。**push 仍需 confirm**。
+- **大文件主动拆**: 文件太大（>~500 行单文件 / >~10KB 单组件）欢迎主动拆成多个子文件/子组件，不必征求确认
+
+## 任务循环工作流（Task Loop）
+
+每个 task 必须严格按以下循环执行，直至无 bug：
+
+1. **Claim task** — 从 TaskList 领取，明确 in_progress
+2. **修改代码** — 仅涉及当前 task 的最小变更；**大架构变动**走 plan mode 等用户 review
+3. **Sub-agent 审查 + 测试** — 派 Explore / Plan sub-agent：
+   - 审查：正确性 / 边界 / CR 自检单 12 条
+   - 测试：跑相关 pytest（如有）/ 启 dev server / 截图
+4. **修 bug 循环** — sub-agent 发现问题 → 我修 → 再审 → 直至无问题
+5. **Commit** — 展示 diff（透明步骤） → sub-agent + 测试通过即可自主 `git commit`（用户可中断）
+6. **Next task** — 重复 1-5
+
+**用户 review 触发条件**:
+- Plan 文档（plan mode 输出）
+- 大架构变动（新增模块 / 重写核心组件 / 跨服务边界改动 / schema 重大变化）
+
+**非用户 review 范围**（自主 commit）:
+- 普通 bug 修复 / 单文件小改 / 重构内部细节
+- 文档 / 配置 / 脚本（已记录到 [[feedback-workflow-flexibility]]）
+- 新增子组件 / 子工具
+
+**禁止跳过审查**：sub-agent 步骤不可省（仅文档级改动除外，参见 [[feedback-workflow-flexibility]]）。
 
 ### CR Checklist (Code Review 自查清单)
 
