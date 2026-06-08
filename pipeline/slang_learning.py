@@ -889,17 +889,6 @@ class SlangLearner:
                     # 持久化 REJECTED 状态 + reject_until，保证 daemon
                     # 重启后 _should_skip 仍能识别沉默期。
                     self._persist_candidate(candidate)
-                    # 同步删除 slang_mappings 记录，确保爬虫不再使用
-                    # 被 LLM 否定为黑产的词作为采集关键词。
-                    # 注意：预设种子词也有 mapping 记录，必须一并清除。
-                    db_del = self._db_service
-                    if db_del is None:
-                        from services.database import PostgreSQLService
-                        db_del = PostgreSQLService.get_instance()
-                    try:
-                        db_del.delete_slang_mappings([candidate.word])
-                    except Exception as e:
-                        logger.error(f"Failed to delete slang_mapping for {candidate.word}: {e}")
                     logger.info(
                         f"REJECTED slang: {candidate.word} (silenced until {candidate.reject_until})"
                     )
@@ -913,6 +902,18 @@ class SlangLearner:
                     candidate.regex_pattern = None
                     candidate.meaning = None
                     self._persist_candidate(candidate)
+
+                # 无论是否耗尽重试，只要 LLM 明确判非黑产，就立即从
+                # slang_mappings 中删除，避免爬虫继续采集已被否定的词
+                # （尤其是 preset 种子词，如邪修）。
+                db_del = self._db_service
+                if db_del is None:
+                    from services.database import PostgreSQLService
+                    db_del = PostgreSQLService.get_instance()
+                try:
+                    db_del.delete_slang_mappings([candidate.word])
+                except Exception as e:
+                    logger.error(f"Failed to delete slang_mapping for {candidate.word}: {e}")
 
         if layer_failure_counts:
             summary = ", ".join(f"{k}={v}" for k, v in sorted(layer_failure_counts.items(), key=lambda x: -x[1]))
