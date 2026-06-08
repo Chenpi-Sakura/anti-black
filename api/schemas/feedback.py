@@ -1,7 +1,8 @@
 """
 Pydantic schemas for Feedback APIs
 """
-from pydantic import BaseModel, Field
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 
 
@@ -23,3 +24,30 @@ class FeedbackResponse(BaseModel):
     feedback_id: str
     message: str = "Feedback submitted successfully"
     platinum_enrolled: bool = False
+
+
+class FeedbackItem(BaseModel):
+    """Response schema for a single feedback row."""
+    # `model_update_status` field collides with pydantic's protected `model_` namespace;
+    # explicitly opt out to silence the deprecation warning without renaming the DB column.
+    model_config = ConfigDict(protected_namespaces=())
+    feedback_id: str
+    clue_id: str
+    feedback_type: str
+    correct_risk_label_level1: Optional[str] = None
+    correct_risk_label_level2: Optional[str] = None
+    correct_entities: list[dict] = Field(default_factory=list)
+    comment: Optional[str] = None
+    operator: str = ""
+    platinum_enrolled: bool = False
+    sample_weight: int = 1
+    model_update_status: str = "IDLE"
+    created_at: Optional[datetime] = None
+
+
+class FeedbackListResponse(BaseModel):
+    """Response schema for paginated feedback list."""
+    page_no: int
+    page_size: int
+    total: int
+    items: list[FeedbackItem]

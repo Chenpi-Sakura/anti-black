@@ -538,6 +538,10 @@ class PostgreSQLService:
             # Feedback indexes
             (f"CREATE INDEX IF NOT EXISTS idx_feedback_clue_id ON {schema}.feedback(clue_id)",),
             (f"CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON {schema}.feedback(created_at)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_feedback_feedback_type ON {schema}.feedback(feedback_type)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_feedback_platinum_enrolled ON {schema}.feedback(platinum_enrolled)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_feedback_model_update_status ON {schema}.feedback(model_update_status)",),
+            (f"CREATE INDEX IF NOT EXISTS idx_feedback_operator ON {schema}.feedback(operator)",),
 
             # SeedWord indexes
             (f"CREATE INDEX IF NOT EXISTS idx_seed_words_status ON {schema}.seed_words(status)",),
@@ -1224,6 +1228,96 @@ class PostgreSQLService:
             cur.execute(sql.SQL("SELECT * FROM {}.feedback WHERE feedback_id = %s").format(
                 sql.Identifier(self.schema)), (feedback_id,))
             return cur.fetchone()
+
+    def list_feedbacks(
+        self,
+        feedback_type: Optional[str] = None,
+        clue_id: Optional[str] = None,
+        platinum_enrolled: Optional[bool] = None,
+        model_update_status: Optional[str] = None,
+        operator: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+        sort_by: str = "created_at",
+        sort_order: int = -1,
+        page_no: int = 1,
+        page_size: int = 20
+    ) -> Dict[str, Any]:
+        """List feedback with filtering, sorting, and pagination.
+
+        Mirrors get_clues() at line 1094 for the standard list/filter/sort pattern.
+        Returned items are real-dict rows from psycopg2 RealDictCursor; datetime
+        fields are not pre-formatted (FastAPI response layer handles ISO serialization).
+        """
+        conditions = []
+        params: Dict[str, Any] = {}
+
+        if feedback_type:
+            conditions.append("feedback_type = %(feedback_type)s")
+            params['feedback_type'] = feedback_type
+        if clue_id:
+            conditions.append("clue_id = %(clue_id)s")
+            params['clue_id'] = clue_id
+        if platinum_enrolled is not None:
+            conditions.append("platinum_enrolled = %(platinum_enrolled)s")
+            params['platinum_enrolled'] = platinum_enrolled
+        if model_update_status:
+            conditions.append("model_update_status = %(model_update_status)s")
+            params['model_update_status'] = model_update_status
+        if operator:
+            conditions.append("operator = %(operator)s")
+            params['operator'] = operator
+        if start_time:
+            conditions.append("created_at >= %(start_time)s")
+            params['start_time'] = start_time
+        if end_time:
+            conditions.append("created_at <= %(end_time)s")
+            params['end_time'] = end_time
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        sort_dir = "DESC" if sort_order == -1 else "ASC"
+        # Whitelist sortable columns to prevent SQL injection on the dynamic ORDER BY
+        allowed_sort_cols = {
+            "created_at", "feedback_id", "feedback_type",
+            "platinum_enrolled", "model_update_status", "sample_weight",
+        }
+        if sort_by not in allowed_sort_cols:
+            sort_by = "created_at"
+
+        # Total count
+        with self._get_cursor() as cur:
+            count_query = sql.SQL("""
+                SELECT COUNT(*) AS total FROM {}.feedback WHERE {}
+            """).format(sql.Identifier(self.schema), sql.SQL(where_clause))
+            cur.execute(count_query, params)
+            total = cur.fetchone()['total']
+
+        # Paginated items
+        offset = (page_no - 1) * page_size
+        params['limit'] = page_size
+        params['offset'] = offset
+
+        with self._get_cursor() as cur:
+            cur.execute(sql.SQL("""
+                SELECT * FROM {}.feedback
+                WHERE {}
+                ORDER BY {} {}
+                LIMIT %(limit)s OFFSET %(offset)s
+            """).format(
+                sql.Identifier(self.schema),
+                sql.SQL(where_clause),
+                sql.Identifier(sort_by),
+                sql.SQL(sort_dir)
+            ), params)
+            items = cur.fetchall()
+
+        return {
+            "page_no": page_no,
+            "page_size": page_size,
+            "total": total,
+            "items": items
+        }
 
     # ========== SeedWord Operations ==========
 
