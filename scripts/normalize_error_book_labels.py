@@ -69,10 +69,13 @@ def main():
     cur = conn.cursor()
     try:
         # Preview: show distribution of polluted labels
+        # BUG-FIX (2026-06-07): build IN clause from constants — psycopg2
+        # does not auto-expand tuple-of-tuples to IN (...) list.
+        canonical_in = "(" + ", ".join(f"'{l}'" for l in CANONICAL_LABELS) + ")"
         cur.execute(
             f"SELECT llm_label, count(*) FROM {args.schema}.error_book "
-            f"WHERE llm_label IS NOT NULL AND llm_label NOT IN %s GROUP BY llm_label ORDER BY 2 DESC",
-            (CANONICAL_LABELS,),
+            f"WHERE llm_label IS NOT NULL AND llm_label NOT IN {canonical_in} "
+            f"GROUP BY llm_label ORDER BY 2 DESC"
         )
         print("[normalize_error_book_labels] polluted llm_label values:")
         polluted = cur.fetchall()
@@ -86,8 +89,8 @@ def main():
 
         cur.execute(
             f"SELECT original_label, count(*) FROM {args.schema}.error_book "
-            f"WHERE original_label IS NOT NULL AND original_label NOT IN %s GROUP BY original_label ORDER BY 2 DESC",
-            (CANONICAL_LABELS,),
+            f"WHERE original_label IS NOT NULL AND original_label NOT IN {canonical_in} "
+            f"GROUP BY original_label ORDER BY 2 DESC"
         )
         print("[normalize_error_book_labels] polluted original_label values:")
         polluted_orig = cur.fetchall()
@@ -100,16 +103,18 @@ def main():
             print(f"  total polluted: {total}")
 
         # Build UPDATEs — only touch rows that have a polluted label
-        # (anything outside the 5 canonical strings).
+        # (anything outside the 5 canonical strings). Use the
+        # inlined canonical_in clause (BUG-FIX 2026-06-07 — psycopg2
+        # does not auto-expand tuple to IN list).
         update_llm = (
             f"UPDATE {args.schema}.error_book "
             f"SET llm_label = {normalize_sql('llm_label')} "
-            f"WHERE llm_label IS NOT NULL AND llm_label NOT IN %s"
+            f"WHERE llm_label IS NOT NULL AND llm_label NOT IN {canonical_in}"
         )
         update_orig = (
             f"UPDATE {args.schema}.error_book "
             f"SET original_label = {normalize_sql('original_label')} "
-            f"WHERE original_label IS NOT NULL AND original_label NOT IN %s"
+            f"WHERE original_label IS NOT NULL AND original_label NOT IN {canonical_in}"
         )
 
         if not args.apply:
@@ -117,9 +122,9 @@ def main():
             print("[normalize_error_book_labels] DRY-RUN: no changes made")
             return
 
-        cur.execute(update_llm, (CANONICAL_LABELS,))
+        cur.execute(update_llm)
         n_llm = cur.rowcount
-        cur.execute(update_orig, (CANONICAL_LABELS,))
+        cur.execute(update_orig)
         n_orig = cur.rowcount
         conn.commit()
         print(f"[normalize_error_book_labels] APPLIED: llm_label updated {n_llm} rows, "
