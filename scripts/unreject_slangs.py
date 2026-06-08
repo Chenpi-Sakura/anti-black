@@ -146,15 +146,13 @@ def main():
                 return
 
         # Apply: reset to LIKELY with reject_until=NULL, inference_count=0.
-        # Also reset validation_trigger_msg_id to NULL so the validator
-        # doesn't filter out all restored contexts (otherwise independent_contexts
-        # filter would drop everything and we'd hit layer='no_contexts' again).
+        # Also reset regex_pattern to NULL so the validator generates a
+        # fresh regex for the restored contexts.
         cur.execute(f"""
             UPDATE {args.schema}.slang_candidates
             SET status = 'LIKELY',
                 reject_until = NULL,
                 inference_count = 0,
-                validation_trigger_msg_id = NULL,
                 regex_pattern = NULL,
                 updated_at = NOW()
             WHERE status = 'REJECTED'
