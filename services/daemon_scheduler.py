@@ -6,7 +6,7 @@ import asyncio
 import logging
 import signal
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from config import get_config
 
@@ -644,12 +644,16 @@ class DaemonScheduler:
                 logger.info(f"Promoted slang to seed word: {candidate.word}")
 
 
-    async def _send_to_dlq(self, topic: str, batch: Dict, error_msg: str) -> int:
+    async def _send_to_dlq(self, topic: str, batch: Union[Dict, List], error_msg: str) -> int:
         """Write a failed Kafka batch to the dead letter queue.
 
         Called by _kafka_consumer_loop when _process_messages raises.
         Each message in the batch is recorded individually so an
         operator can inspect/replay later via DLQ_REPLAY_TOOL.
+
+        Handles both Dict[TopicPartition, List[ConsumerRecord]] (from
+        consumer.getmany) and bare List[ConsumerRecord] (when getmany
+        returns a list or error path normalizes to list form).
 
         Note: psycopg2 is sync, so we wrap the DB write in to_thread
         to avoid blocking the asyncio event loop. This is a P0-2
@@ -659,31 +663,42 @@ class DaemonScheduler:
         from services.database import PostgreSQLService
         pg_db = PostgreSQLService.get_instance()
         written = 0
-        # batch is Dict[TopicPartition, List[ConsumerRecord]] from
-        # aiokafka; iterate topics/partitions/records.
-        for tp, records in batch.items():
-            for record in records:
-                payload = record.value if isinstance(record.value, dict) else {"raw": str(record.value)}
-                msg_id = None
-                if isinstance(payload, dict):
-                    msg_id = payload.get("message_id")
-                try:
-                    await asyncio.to_thread(
-                        pg_db.insert_dlq_message,
-                        topic=topic,
-                        partition_id=tp.partition,
-                        kafka_offset=record.offset,
-                        message_id=msg_id,
-                        payload=payload,
-                        error_msg=error_msg,
-                    )
-                    written += 1
-                except Exception as e:
-                    logger.error(
-                        f"DLQ write failed for offset={record.offset}: {e}"
-                    )
+        total = 0
+
+        # Normalize to list of (partition_id, kafka_offset, value) tuples
+        records_iter = []
+        if isinstance(batch, dict):
+            for tp, records in batch.items():
+                total += len(records)
+                for record in records:
+                    records_iter.append((tp.partition, record.offset, record.value))
+        else:
+            # list form — no partition/offset metadata available
+            total = len(batch)
+            for record in batch:
+                value = record.value if hasattr(record, 'value') else record
+                records_iter.append((0, 0, value))
+
+        for partition_id, kafka_offset, value in records_iter:
+            payload = value if isinstance(value, dict) else {"raw": str(value)}
+            msg_id = payload.get("message_id") if isinstance(payload, dict) else None
+            try:
+                await asyncio.to_thread(
+                    pg_db.insert_dlq_message,
+                    topic=topic,
+                    partition_id=partition_id,
+                    kafka_offset=kafka_offset,
+                    message_id=msg_id,
+                    payload=payload,
+                    error_msg=error_msg,
+                )
+                written += 1
+            except Exception as e:
+                logger.error(
+                    f"DLQ write failed for offset={kafka_offset}: {e}"
+                )
         logger.warning(
-            f"DLQ: wrote {written}/{sum(len(r) for r in batch.values())} "
+            f"DLQ: wrote {written}/{total} "
             f"messages from failed batch"
         )
         return written
