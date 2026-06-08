@@ -558,9 +558,9 @@ class SlangLearner:
             logger.warning(f"No contexts found in clues for '{candidate.word}'")
             return (False, "no_contexts_in_clues")
 
-        # 前 10 条发给 LLM 做 prompt context，后面做 backtest
-        contexts_sample = all_contexts[:10]
-        backtest_contexts = all_contexts[10:] if len(all_contexts) > 10 else []
+        # 15 条发给 LLM 做 prompt context，剩余用来做 backtest（上限 50 条）
+        contexts_sample = all_contexts[:15]
+        backtest_contexts = all_contexts[15:65] if len(all_contexts) > 15 else []
 
         # ---- 三段式 Prompt：人设 + 核心防误判 + 对抗性样本 ----
         prompt = f"""你是一个顶级的【黑产风控情报专家】。本系统聚焦【字节跳动旗下产品的黑灰产业】（抖音 / TikTok / 头条 / 西瓜 / 飞书 / 豆包 / 剪映 等）。你的任务是鉴定给定的词汇是否为字节系黑产（如账号买卖、刷量刷粉、私域引流、规避审查代称）发明的【专属暗语/代称/行话】。
