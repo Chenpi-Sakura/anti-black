@@ -5,7 +5,7 @@
     <div class="filters-card">
       <el-form :inline="true" :model="filters">
         <el-form-item label="风险类型">
-          <el-select v-model="risk_label_level1" placeholder="全部" clearable>
+          <el-select v-model="risk_label_level1" placeholder="全部" clearable style="width: 160px">
             <el-option
               v-for="item in riskTypeOptions"
               :key="item.value"
@@ -15,7 +15,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="来源渠道">
-          <el-select v-model="source_channel" placeholder="全部" clearable>
+          <el-select v-model="source_channel" placeholder="全部" clearable style="width: 160px">
             <el-option
               v-for="item in channelOptions"
               :key="item.value"
@@ -203,11 +203,13 @@ async function loadDropdownOptions() {
   try {
     const taxRes = await taxonomyApi.get()
     const categories = taxRes.data?.data?.categories || []
-    riskTypeOptions.value = categories
+    const opts = categories
       .filter(c => c.level1_name && c.level1_name !== '无关')
       .map(c => ({ label: c.level1_name, value: c.level1_name }))
+    if (opts.length === 0) throw new Error('taxonomy returned 0 categories')
+    riskTypeOptions.value = opts
   } catch (e) {
-    console.error('Failed to load taxonomy:', e)
+    console.warn('Failed to load taxonomy, using fallback:', e)
     // Fallback: hardcoded options
     riskTypeOptions.value = [
       { label: '账号交易', value: '账号交易' },
@@ -222,11 +224,13 @@ async function loadDropdownOptions() {
   try {
     const chRes = await channelApi.list()
     const channels = chRes.data?.data || []
-    channelOptions.value = channels
+    const opts = channels
       .filter(c => c.platform && CHANNEL_NAME_MAP[c.platform])
       .map(c => ({ label: CHANNEL_NAME_MAP[c.platform], value: c.platform }))
+    if (opts.length === 0) throw new Error('channels API returned 0 usable options')
+    channelOptions.value = opts
   } catch (e) {
-    console.error('Failed to load channels:', e)
+    console.warn('Failed to load channels, using fallback:', e)
     // Fallback: hardcoded options
     channelOptions.value = [
       { label: '抖音', value: 'douyin' },
