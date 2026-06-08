@@ -599,10 +599,18 @@ class SlangLearner:
                 logger.error(f"JSON parse failed for {candidate.word}: {e}")
                 return (False, f"json_parse:{e}")
 
-            # 短期硬筛：LLM 自报非黑话
+            # 短期硬筛：LLM 自报非黑话 — 仅作为 advisory，不再硬 reject。
+            # BUG-FIX (2026-06-08): 让 60% backtest 当最终仲裁者。
+            # 原因: LLM 在 is_valid_slang=false 时仍然会返回 regex（按
+            # prompt 结构要求），backtest 在真实 contexts 上跑 60% 命中
+            # 测试才是真正区分"真黑话"和"日常短语"的依据。LLM
+            # 自报"非黑话"对真黑话（如"万粉号"/"换绑即可绝不找回"）
+            # 经常误判，因为它只看到 10 个抽样 context，没有完整语境。
             if not result.get('is_valid_slang', False):
-                logger.info(f"LLM self-reported not-slang: {candidate.word}")
-                return (False, "llm_self_report:not_valid")
+                logger.info(
+                    f"LLM self-reported not-slang (advisory, will still backtest): "
+                    f"{candidate.word}"
+                )
 
             # 保存 regex_pattern
             candidate.regex_pattern = result.get('regex_pattern')
