@@ -33,10 +33,6 @@
     <main class="app-main">
       <router-view />
     </main>
-
-    <footer class="app-footer">
-      <span>© 2026 黑灰产情报分析Agent系统 · v1.0</span>
-    </footer>
   </div>
 </template>
 
@@ -174,15 +170,5 @@ onMounted(async () => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.app-footer {
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-top: var(--border-thin) solid var(--color-divider);
-  color: var(--color-text-muted);
-  font-size: 12px;
 }
 </style>

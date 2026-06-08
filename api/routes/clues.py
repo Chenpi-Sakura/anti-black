@@ -25,6 +25,7 @@ def get_clues(
     page_size: int = Query(default=10, ge=1, le=100, description="每页条数"),
     sort_by: str = Query(default="published_at", description="排序字段"),
     sort_order: int = Query(default=-1, description="排序方向"),
+    include_test: bool = Query(default=False, description="是否包含测试数据 (e2e + 空渠道)"),
     db=Depends(get_db)
 ):
     """Get clues list with filtering and pagination."""
@@ -39,7 +40,8 @@ def get_clues(
         page_no=page_no,
         page_size=page_size,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
+        include_test=include_test,
     )
 
     return format_success_response(result)

@@ -1119,11 +1119,23 @@ class PostgreSQLService:
         sort_by: str = "published_at",
         sort_order: int = -1,
         page_no: int = 1,
-        page_size: int = 10
+        page_size: int = 10,
+        include_test: bool = False,
     ) -> Dict[str, Any]:
-        """Get clues with filtering and pagination."""
+        """Get clues with filtering and pagination.
+
+        `include_test=False` (default) excludes test data:
+        - source_channel = 'e2e' (end-to-end test clues)
+        - source_channel IS NULL or '' (orphaned rows from early ingestion)
+        This keeps the public-facing list clean. Pass include_test=True for
+        development / debugging to see the full table.
+        """
         conditions = []
         params = {}
+
+        if not include_test:
+            # Exclude test data and orphans from default responses
+            conditions.append("source_channel IS NOT NULL AND source_channel != '' AND source_channel != 'e2e'")
 
         if query_id:
             conditions.append("query_id = %(query_id)s")

@@ -34,14 +34,18 @@ defineProps({
 
 const emit = defineEmits(['click'])
 
+const CHANNEL_NAME_MAP = {
+  'douyin': '抖音',
+  'baidu_tieba': '贴吧',
+  'weibo': '微博',
+  'xiaohongshu': '小红书',
+  'kuaishou': '快手',
+  'telegram': 'Telegram',
+  'e2e': '测试'
+}
+
 function getChannelName(channel) {
-  const map = {
-    'douyin': '抖音',
-    'baidu_tieba': '贴吧',
-    'telegram': 'Telegram',
-    'forum': '论坛'
-  }
-  return map[channel] || channel || '-'
+  return CHANNEL_NAME_MAP[channel] || channel || '-'
 }
 
 function formatTime(timeStr) {

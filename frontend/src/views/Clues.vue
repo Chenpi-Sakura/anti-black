@@ -6,17 +6,22 @@
       <el-form :inline="true" :model="filters">
         <el-form-item label="风险类型">
           <el-select v-model="filters.risk_label_level1" placeholder="全部" clearable>
-            <el-option label="账号交易" value="账号交易" />
-            <el-option label="诈骗引流" value="诈骗引流" />
-            <el-option label="流量作弊" value="流量作弊" />
-            <el-option label="黑产工具" value="黑产工具" />
+            <el-option
+              v-for="item in riskTypeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="来源渠道">
           <el-select v-model="filters.source_channel" placeholder="全部" clearable>
-            <el-option label="抖音" value="douyin" />
-            <el-option label="贴吧" value="baidu_tieba" />
-            <el-option label="Telegram" value="telegram" />
+            <el-option
+              v-for="item in channelOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="时间范围">
@@ -75,16 +80,18 @@
       </div>
 
       <el-empty v-if="clues.length === 0 && !loading" description="暂无线索数据" />
+    </div>
 
-      <div class="pagination-wrapper" v-if="total > 0">
-        <el-pagination
-          v-model:current-page="pagination.page_no"
-          :page-size="pagination.page_size"
-          :total="total"
-          layout="prev, pager, next, total"
-          @current-change="loadClues"
-        />
-      </div>
+    <div class="pagination-wrapper" v-if="total > 0">
+      <el-pagination
+        v-model:current-page="pagination.page_no"
+        :page-size="pagination.page_size"
+        :total="total"
+        :pager-count="7"
+        layout="prev, pager, next, jumper, total"
+        background
+        @current-change="loadClues"
+      />
     </div>
   </div>
 </template>
@@ -92,8 +99,9 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { clueApi } from '../api'
+import { clueApi, taxonomyApi, channelApi } from '../api'
 import { CircleCheck, Warning, Location } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const clues = ref([])
@@ -110,13 +118,23 @@ const filters = reactive({
   dateRange: null
 })
 
+// Dynamic dropdown options
+const riskTypeOptions = ref([])
+const channelOptions = ref([])
+
+// Channel display name map (shared between dropdown and card footer)
+const CHANNEL_NAME_MAP = {
+  'douyin': '抖音',
+  'baidu_tieba': '贴吧',
+  'weibo': '微博',
+  'xiaohongshu': '小红书',
+  'kuaishou': '快手',
+  'telegram': 'Telegram'
+  // 'e2e' deliberately omitted: test data should not surface in UI
+}
+
 function getChannelName(channel) {
-  const map = {
-    'douyin': '抖音',
-    'baidu_tieba': '贴吧',
-    'telegram': 'Telegram'
-  }
-  return map[channel] || channel
+  return CHANNEL_NAME_MAP[channel] || channel || '-'
 }
 
 function formatTime(timeStr) {
@@ -147,10 +165,56 @@ async function loadClues() {
       clues.value = data.items || []
       total.value = data.total || 0
     }
+
+    if (clues.value.length === 0 && pagination.page_no > 1) {
+      ElMessage.info('已翻到最后一页')
+    }
   } catch (e) {
     console.error('Failed to load clues:', e)
+    ElMessage.error('加载线索失败: ' + (e.response?.data?.message || e.message))
   } finally {
     loading.value = false
+  }
+}
+
+async function loadDropdownOptions() {
+  // Load risk types from taxonomy API
+  try {
+    const taxRes = await taxonomyApi.get()
+    const categories = taxRes.data?.data?.categories || []
+    riskTypeOptions.value = categories
+      .filter(c => c.level1_name && c.level1_name !== '无关')
+      .map(c => ({ label: c.level1_name, value: c.level1_name }))
+  } catch (e) {
+    console.error('Failed to load taxonomy:', e)
+    // Fallback: hardcoded options
+    riskTypeOptions.value = [
+      { label: '账号交易', value: '账号交易' },
+      { label: '诈骗引流', value: '诈骗引流' },
+      { label: '流量作弊', value: '流量作弊' },
+      { label: '黑产工具', value: '黑产工具' },
+      { label: '未知/其他', value: '未知/其他' }
+    ]
+  }
+
+  // Load channel options from channels API
+  try {
+    const chRes = await channelApi.list()
+    const channels = chRes.data?.data || []
+    channelOptions.value = channels
+      .filter(c => c.platform && CHANNEL_NAME_MAP[c.platform])
+      .map(c => ({ label: CHANNEL_NAME_MAP[c.platform], value: c.platform }))
+  } catch (e) {
+    console.error('Failed to load channels:', e)
+    // Fallback: hardcoded options
+    channelOptions.value = [
+      { label: '抖音', value: 'douyin' },
+      { label: '贴吧', value: 'baidu_tieba' },
+      { label: '微博', value: 'weibo' },
+      { label: '小红书', value: 'xiaohongshu' },
+      { label: '快手', value: 'kuaishou' },
+      { label: 'Telegram', value: 'telegram' }
+    ]
   }
 }
 
@@ -171,7 +235,8 @@ function showFeedback(clue, type) {
   console.log('Feedback:', clue.clue_id, type)
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadDropdownOptions()
   loadClues()
 })
 </script>
@@ -180,10 +245,16 @@ onMounted(() => {
 .clues-page {
   max-width: 1200px;
   margin: 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .page-title {
   margin-bottom: var(--spacing-lg);
+  flex-shrink: 0;
 }
 
 .filters-card {
@@ -192,12 +263,17 @@ onMounted(() => {
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
   margin-bottom: var(--spacing-md);
+  flex-shrink: 0;
 }
 
 .clues-list {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .clue-card {
@@ -279,5 +355,9 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   margin-top: var(--spacing-md);
+  flex-shrink: 0;
+  padding: var(--spacing-xs) 0;
+  background: var(--color-surface);
+  border-top: var(--border-thin) solid var(--color-divider);
 }
 </style>
