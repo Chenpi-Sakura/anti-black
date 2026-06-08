@@ -5,7 +5,7 @@
     <div class="filters-card">
       <el-form :inline="true" :model="filters">
         <el-form-item label="风险类型">
-          <el-select v-model="filters.risk_label_level1" placeholder="全部" clearable>
+          <el-select v-model="risk_label_level1" placeholder="全部" clearable>
             <el-option
               v-for="item in riskTypeOptions"
               :key="item.value"
@@ -15,7 +15,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="来源渠道">
-          <el-select v-model="filters.source_channel" placeholder="全部" clearable>
+          <el-select v-model="source_channel" placeholder="全部" clearable>
             <el-option
               v-for="item in channelOptions"
               :key="item.value"
@@ -26,7 +26,7 @@
         </el-form-item>
         <el-form-item label="时间范围">
           <el-date-picker
-            v-model="filters.dateRange"
+            v-model="dateRange"
             type="daterange"
             range-separator="至"
             start-placeholder="开始日期"
@@ -111,7 +111,26 @@ const store = useAppStore()
 const clues = computed(() => store.clues)
 const total = computed(() => store.cluesPagination.total)
 const pagination = store.cluesPagination  // mutate directly; reactive ref
-const filters = store.cluesFilters        // mutate directly; reactive ref
+
+// Filter bindings — el-select v-model needs reactive get/set. Reading
+// store.cluesFilters.X directly returns a plain primitive (untracked), so
+// selecting a value re-renders the input AND writes back to the store only
+// if the read goes through a computed. Use computed refs and bind them
+// directly in template.
+const risk_label_level1 = computed({
+  get: () => store.cluesFilters.risk_label_level1,
+  set: (v) => { store.cluesFilters.risk_label_level1 = v }
+})
+const source_channel = computed({
+  get: () => store.cluesFilters.source_channel,
+  set: (v) => { store.cluesFilters.source_channel = v }
+})
+const dateRange = computed({
+  get: () => store.cluesFilters.dateRange,
+  set: (v) => { store.cluesFilters.dateRange = v }
+})
+// el-form :model just needs a non-null object; it doesn't have to track fields.
+const filters = { risk_label_level1, source_channel, dateRange }
 
 const loading = ref(false)
 
@@ -146,13 +165,14 @@ async function loadClues() {
     const params = {
       page_no: pagination.page_no,
       page_size: pagination.page_size,
-      risk_label_level1: filters.risk_label_level1 || undefined,
-      source_channel: filters.source_channel || undefined
+      // script-context access: these are computed refs, so read .value
+      risk_label_level1: risk_label_level1.value || undefined,
+      source_channel: source_channel.value || undefined
     }
 
-    if (filters.dateRange?.length === 2) {
-      params.start_time = filters.dateRange[0].toISOString()
-      params.end_time = filters.dateRange[1].toISOString()
+    if (dateRange.value?.length === 2) {
+      params.start_time = dateRange.value[0].toISOString()
+      params.end_time = dateRange.value[1].toISOString()
     }
 
     const res = await clueApi.list(params)
