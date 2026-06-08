@@ -32,7 +32,17 @@ SOURCES (audited 2026-06-07 from 26,793 LIKELY pool)
 - Confirmed false-positives from scripts/_slang_report.txt
 """
 
+import json
+import threading
+from datetime import datetime
+from pathlib import Path
 from typing import Set
+
+# Runtime-registered stopwords persistence (mtime-aware reload for live daemon)
+_lock = threading.RLock()
+_loaded: bool = False
+_last_mtime_ns: int = 0
+_STATE_PATH: Path = Path(__file__).resolve().parent.parent / "data" / "stopword_register.json"
 
 # IMPORTANT: Set[str], not List[str]. O(1) lookup.
 _STOPWORDS: Set[str] = {
@@ -139,9 +149,100 @@ _STOPWORDS: Set[str] = {
 }
 
 
+def _ensure_loaded() -> None:
+    """Lazy-load + mtime-aware auto-reload of operator-registered stopwords.
+
+    Mirrors config/slang_blacklist.py:_ensure_loaded() (lines 265-293).
+    Adds mtime check so operator apply_stopword_audit.py --apply changes
+    are picked up by the running daemon WITHOUT a restart.
+    Idempotent + thread-safe.
+    """
+    global _loaded, _last_mtime_ns
+    with _lock:
+        if not _STATE_PATH.exists():
+            _loaded = True
+            return
+        try:
+            current_mtime_ns = _STATE_PATH.stat().st_mtime_ns
+        except OSError:
+            _loaded = True
+            return
+        if _loaded and current_mtime_ns == _last_mtime_ns:
+            return  # file unchanged, no reload needed
+        try:
+            raw = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+            registered = raw.get("words", [])
+            added = 0
+            for w in registered:
+                if isinstance(w, str) and w and w not in _STOPWORDS:
+                    _STOPWORDS.add(w)
+                    added += 1
+            _last_mtime_ns = current_mtime_ns
+            _loaded = True
+            if added:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Loaded %d runtime-registered stopwords from %s (mtime check, delta=%d)",
+                    added, _STATE_PATH, added
+                )
+        except (json.JSONDecodeError, OSError) as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to load stopword_register.json: %s — keeping current set", e
+            )
+            _loaded = True
+
+
+def _persist_unlocked() -> None:
+    """Write runtime-registered stopwords to disk. Caller must hold _lock.
+
+    Bumps file mtime so _ensure_loaded() re-reads on next is_stopword() call.
+    Only runtime-ADDED entries are persisted; hardcoded 450 stay in source.
+    """
+    _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    existing: Set[str] = set()
+    if _STATE_PATH.exists():
+        try:
+            existing = set(json.loads(_STATE_PATH.read_text(encoding="utf-8")).get("words", []))
+        except (json.JSONDecodeError, OSError):
+            existing = set()
+    new_additions = _STOPWORDS - existing
+    merged = existing | new_additions
+    payload = {
+        "version": 1,
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+        "words": sorted(merged),
+    }
+    tmp = _STATE_PATH.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(_STATE_PATH)  # atomic, mtime always updates
+
+
+def register_stopword(word: str) -> bool:
+    """Add a runtime-registered stopword. Returns True if newly added.
+
+    Persists to data/stopword_register.json so the file's mtime changes
+    and running daemons pick it up via _ensure_loaded()'s mtime check
+    (no daemon restart needed).
+    Thread-safe. Idempotent (returns False if already present).
+    """
+    if not word or not isinstance(word, str):
+        return False
+    with _lock:
+        _ensure_loaded()
+        if word in _STOPWORDS:
+            return False
+        _STOPWORDS.add(word)
+        _persist_unlocked()
+        return True
+
+
 def is_stopword(w: str) -> bool:
     """Return True if `w` is a high-frequency non-slang word.
 
-    O(1) lookup via Set.
+    O(1) lookup via Set. Each call checks file mtime (cheap stat()),
+    auto-reloads if operator applied new stopwords since last call.
     """
-    return w in _STOPWORDS
+    with _lock:
+        _ensure_loaded()
+        return w in _STOPWORDS
