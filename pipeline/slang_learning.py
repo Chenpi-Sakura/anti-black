@@ -893,6 +893,12 @@ class SlangLearner:
                 else:
                     # 中间失败也落盘 inference_count，防止 daemon 重启后
                     # inference_count 归零导致无限重试。
+                    # 注意：清除 regex_pattern 和 meaning，让下次验证
+                    # 时 LLM 重新生成（否则 regex_pattern 非空会导致
+                    # eligibility 过滤 regex_pattern is None 为 False，
+                    # 候选词被永久跳过不再验证）。
+                    candidate.regex_pattern = None
+                    candidate.meaning = None
                     self._persist_candidate(candidate)
 
         if layer_failure_counts:
