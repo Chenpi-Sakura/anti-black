@@ -607,9 +607,16 @@ class SlangLearner:
 - regex 用 Python re 模块语法即可（Python re 原生支持 UTF-8 emoji，无需特殊转义）。
 
 【正则与对抗性样本规则】：
-1. 正则 (regex_pattern)：必须精准，既不能硬编码无用的语气词，也不能过度泛化导致误杀正常语句。
+1. 正则 (regex_pattern)：**优先使用带上下文的组合 regex**，不要用裸词！
+   → 正确示例：(?:出|收|卖).*万粉号（绑定了交易动作和对象，大幅降低误杀）
+   → 错误示例：万粉号（裸词，会误杀所有正常提到万粉号的内容）
+   裸词只能用于极其生僻、几乎不存在歧义的词（如"换绑即可绝不找回"在日常中几乎不出现）。
 2. 正例 (test_positive_cases)：造 2 个【字节系】黑产语境的短句，必须能被你的正则匹配。
-3. 对抗性负例 (test_negative_cases)：造 2 个【包含该候选词核心字眼，但语境完全日常、合法】的短句！例如，如果候选词是"种草"，负例必须是"我在阳台种草"，绝不能用"今天天气很好"这种毫无关联的废话。你的正则绝对不能匹配这两个负例！
+3. 对抗性负例 (test_negative_cases)：造 2 个用来验证你正则精确度的测试用例。注意：
+   a. 如果你的正则只是裸词（没有前缀/后缀约束），负例**绝对不能包含该词或该词的核心字眼**！
+      → 应造"长得像但无害"的场景，例如候选词是"百粉号"，不要写"我养了百粉号"而应写"我的号有一百粉了"
+   b. 如果你的正则含有上下文约束（如 `出.*号`），负例要避免使用多义前缀（如"产出"的"出"），选择句子里绝不会出现该前缀的用词。
+   c. 绝对不要将生僻黑话（如"换绑即可绝不找回"）原封不动塞进负例句子中——现实生活里正常人不会这么说。
 4. **【正则负例绝对不能匹配】** 你生成的 regex_pattern 绝对不能在任何一条 test_negative_cases 上产生匹配。注意：中文环境下绝对不要使用 \\b (词边界)！因为 Python re 中 \\b 匹配的是单词字符与非单词字符的边界，而中文字符全部属于单词字符，词边界在中文中完全无效。对于极短的通用词（如"出个"/"一半"），请将周围的交易动作、物品属性也写进正则（例如 出个.*(?:号|粉|千) 或 (?:抖音|头条).*出个），确保纯日常语境被彻底排除。
 
 请严格返回 JSON 格式（不要包含 markdown 代码块标记）：
@@ -883,6 +890,10 @@ class SlangLearner:
                     logger.info(
                         f"REJECTED slang: {candidate.word} (silenced until {candidate.reject_until})"
                     )
+                else:
+                    # 中间失败也落盘 inference_count，防止 daemon 重启后
+                    # inference_count 归零导致无限重试。
+                    self._persist_candidate(candidate)
 
         if layer_failure_counts:
             summary = ", ".join(f"{k}={v}" for k, v in sorted(layer_failure_counts.items(), key=lambda x: -x[1]))
