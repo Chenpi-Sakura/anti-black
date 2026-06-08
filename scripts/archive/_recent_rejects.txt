@@ -1,0 +1,28 @@
+=== Most recent REJECTED (last 1h, top 30) ===
+  [06:59] n= 25                         笑]  reject_until=2026-07-08 06:59:36.443764
+  [06:58] n= 27                         金币  reject_until=2026-07-08 06:58:19.902256
+  [06:58] n= 25                         惊喜  reject_until=2026-07-08 06:58:19.897529
+  [06:58] n= 25                         广告  reject_until=2026-07-08 06:58:19.883708
+  [06:56] n= 25                       看到就点  reject_until=2026-07-08 06:56:00.598482
+  [06:56] n= 25                         就点  reject_until=2026-07-08 06:56:00.582204
+  [06:54] n= 26                         夸夸  reject_until=2026-07-08 06:54:46.893763
+  [06:49] n= 25                       专业服务  reject_until=2026-07-08 06:49:34.376564
+  [06:47] n= 26                     需要热度连西  reject_until=2026-07-08 06:47:34.216969
+  [06:47] n= 28                       谁要此号  reject_until=2026-07-08 06:47:34.214870
+  [06:47] n= 26                         音符  reject_until=2026-07-08 06:47:34.211897
+  [06:47] n= 26                         的来  reject_until=2026-07-08 06:47:34.206753
+  [06:47] n= 26                       实名已解  reject_until=2026-07-08 06:47:34.204181
+  [06:47] n= 26                     音符千粉账号  reject_until=2026-07-08 06:47:34.201624
+  [06:47] n= 26                   换绑即可绝不找回  reject_until=2026-07-08 06:47:34.193752
+  [06:15] n= 44                        万粉号  reject_until=2026-07-08 06:15:40.047128
+  [06:15] n= 44                   有需要万粉号的吗  reject_until=2026-07-08 06:15:40.042053
+  [06:15] n= 36                         出號  reject_until=2026-07-08 06:15:40.036633
+  [06:15] n= 36                     有没有出号的  reject_until=2026-07-08 06:15:40.032401
+  [06:15] n= 30                       微信扩列  reject_until=2026-07-08 06:15:40.023417
+
+=== REJECTED count delta (last 1h vs prior 1h) ===
+  last 1h: 20, prior 1h: 0, delta: +20
+
+=== Daemon log slang validation (last 50 lines) ===
+  [90m2026-06-08 14:34:57[0m - [35mservices.daemon_scheduler[0m - [32mINFO[0m - Slang evolution loop started (check_interval=60s, min_likely=5)
+  [90m2026-06-08 14:34:58[0m - [35mservices.daemon_scheduler[0m - [32mINFO[0m - Slang-to-rule bridge loop started (check_interval=300s, threshold=3 new CONFIRMED, baseline=0)

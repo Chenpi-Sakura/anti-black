@@ -1,0 +1,43 @@
+=== Slang state distribution (full) ===
+      LIKELY:  26660
+         NEW: 151302
+    OBSERVED:   4315
+    REJECTED:   1586
+
+=== LIKELY occurrence_count distribution ===
+                                                < 20:      7
+                             20-29 (just hit LIKELY):  26653
+
+=== Recently CONFIRMED (last 30 min) ===
+  (no new CONFIRMED in last 30 min)
+
+=== CONFIRMED total ===
+  total CONFIRMED in DB: 0
+
+=== REJECTED reject_until status ===
+  null: 0 | armed (in future): 1586 | expired: 0 | total: 1586
+
+=== Top 20 LIKELY by count (real slangs near validation gate) ===
+  n= 20                       实名换绑
+  n= 20                     不在为谁改变
+  n= 20                   微信号改什么比较
+  n= 20                         出个
+  n= 20                        粉星仔
+  n= 20                     月份英语缩写
+  n= 20                   健康的汉服运动发
+  n= 20                   基本分为以下几点
+  n= 20                   头跟着大众一起惩
+  n= 20                     花式网名制作
+  n= 20                   游戏号怎么安全换
+  n= 20                    螃蟹游戏服务网
+  n= 20                      新人做抖音
+  n= 20                    十二月英文缩写
+  n= 20                   一到十二月英文缩
+  n= 20                        +反转
+  n= 20                        反转+
+  n= 20                   专属微信号豆包指
+  n= 20                        +福利
+  n= 20                         公式
+
+=== Daemon log validation activity (last 20 lines) ===
+  [90m2026-06-08 14:34:58[0m - [35mservices.daemon_scheduler[0m - [32mINFO[0m - Slang-to-rule bridge loop started (check_interval=300s, threshold=
