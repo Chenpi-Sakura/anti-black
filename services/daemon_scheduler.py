@@ -692,15 +692,21 @@ class DaemonScheduler:
         """Sample and judge high-confidence clues.
 
         P4 (2026-06-07): threshold trigger replaces the legacy
-        "daily at 2 AM" pattern. Polls every 5min; if ≥500 new
-        high-confidence clues accumulated in the last hour, run
+        "daily at 2 AM" pattern. Polls every 5min; if ≥MIN_NEW_HIGH_CONF
+        new high-confidence clues accumulated in the last hour, run
         1% sampling + LLM judging immediately. Otherwise idle wait.
         With 24h ~42k new clues and ~75% high-conf (~32k), this
         fires ~64 times/day (vs 1/day before) — much more responsive
         to embedding classifier drift.
+
+        TUNED (2026-06-08): threshold lowered 500 -> 100. Overnight
+        traffic drops to ~20-30 high-conf/h (vs ~500/h at peak), so
+        500 was effectively never reached after midnight. 100 still
+        catches drift at off-peak (fires every ~4-5h) and stays
+        responsive at peak (~every 10 min).
         """
         check_interval = 300  # 5 min
-        min_new_high_conf = 500
+        min_new_high_conf = 100
         logger.info(
             f"Error book loop started (check_interval={check_interval}s, "
             f"threshold={min_new_high_conf} new high-conf clues)"
