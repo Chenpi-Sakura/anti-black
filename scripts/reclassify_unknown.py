@@ -195,7 +195,7 @@ async def main():
     classifier = Classifier(config)
 
     logger.info("Phase 3a: fetching 未知/其他 clues (last 7d)...")
-    rows = fetch_unknown_clue_ids(db, RECLASSIFY_DAYS, limit=20000)
+    rows = fetch_unknown_clue_ids(db, RECLASSIFY_DAYS, limit=200)
     logger.info(f"Fetched {len(rows)} clues")
     if not rows:
         return
@@ -231,9 +231,10 @@ async def main():
         logger.info("Nothing left for LLM, skipping.")
     else:
         logger.info("Phase 3c: LLM pass with V3 Few-Shot prompt + Semaphore + retries...")
-        # V3: global LLM client singleton (reuse httpx.AsyncClient)
+        # V3: global LLM client singleton. Reads from env (LLM_PRIMARY_*)
+        # already loaded by config's _load_env_file(). Don't pass config object.
         from models.clients.llm import LLMClient
-        llm_client = LLMClient(config)
+        llm_client = LLMClient()
 
         semaphore = asyncio.Semaphore(LLM_SEMAPHORE)
         tasks = [
