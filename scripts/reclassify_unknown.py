@@ -28,7 +28,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from config import get_config  # noqa: E402
-from pipeline.classifier import Classifier, LEVEL1_LABELS  # noqa: E402
+from pipeline.classifier import Classifier  # noqa: E402
 from services.database import PostgreSQLService  # noqa: E402
 import logging  # noqa: E402
 
@@ -140,7 +140,7 @@ def parse_llm_response(raw: str) -> Optional[Dict[str, str]]:
         return None
     level1 = result.get('level1', '').strip()
     level2 = result.get('level2', '').strip()
-    if level1 not in LEVEL1_LABELS:
+    if level1 not in Classifier.LEVEL1_LABELS:
         return None
     return {
         'level1': level1,
