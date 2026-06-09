@@ -43,24 +43,39 @@ RULE_CONFIDENCE_THRESHOLD = 0.7
 LLM_SEMAPHORE = 10
 LLM_RETRIES = [1, 2, 4, 8, 16]
 CHUNK_SIZE = 500
-LLM_CONFIDENCE_THRESHOLD = 0.5  # accept LLM only if confidence > this
+LLM_CONFIDENCE_THRESHOLD = 0.5
+# 默认不限上限——7d 窗口下"未知/其他"通常 7w+ 条，全跑完看用户决定
+DEFAULT_LIMIT = None
 
 
-def fetch_unknown_clue_ids(db, days=RECLASSIFY_DAYS, limit=20000) -> List[Dict[str, Any]]:
+def fetch_unknown_clue_ids(db, days=RECLASSIFY_DAYS, limit=DEFAULT_LIMIT) -> List[Dict[str, Any]]:
     """Pull clue_id + cleaned_text for 未知/其他 in last N days."""
     with db._get_cursor() as cur:
-        cur.execute(
-            """
-            SELECT clue_id, cleaned_text, source_channel
-            FROM antiblack.clues
-            WHERE risk_label_level1 = '未知/其他'
-              AND created_at > NOW() - INTERVAL '%s days'
-              AND cleaned_text IS NOT NULL
-            ORDER BY created_at DESC
-            LIMIT %s
-            """,
-            (days, limit),
-        )
+        if limit is None:
+            cur.execute(
+                """
+                SELECT clue_id, cleaned_text, source_channel
+                FROM antiblack.clues
+                WHERE risk_label_level1 = '未知/其他'
+                  AND created_at > NOW() - INTERVAL '%s days'
+                  AND cleaned_text IS NOT NULL
+                ORDER BY created_at DESC
+                """,
+                (days,),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT clue_id, cleaned_text, source_channel
+                FROM antiblack.clues
+                WHERE risk_label_level1 = '未知/其他'
+                  AND created_at > NOW() - INTERVAL '%s days'
+                  AND cleaned_text IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (days, limit),
+            )
         return cur.fetchall()
 
 
@@ -257,13 +272,13 @@ async def classify_one_with_retry(
         return None
 
 
-async def main():
+async def main(days: int = RECLASSIFY_DAYS, limit: int = DEFAULT_LIMIT, classification_reason: str = "V4 LLM reclassify"):
     config = get_config()
     db = PostgreSQLService.get_instance()
     classifier = Classifier(config)
 
-    logger.info("Phase 3a: fetching 未知/其他 clues (last 7d)...")
-    rows = fetch_unknown_clue_ids(db, RECLASSIFY_DAYS, limit=200)
+    logger.info(f"Phase 3a: fetching 未知/其他 clues (last {days}d, limit={limit})...")
+    rows = fetch_unknown_clue_ids(db, days, limit=limit)
     logger.info(f"Fetched {len(rows)} clues")
     if not rows:
         return
@@ -283,7 +298,7 @@ async def main():
                 'risk_label_level1': hit['level1'],
                 'risk_label_level2': hit['level2'],
                 'classification_source': hit['source'],
-                'classification_reason': 'V3 rule reclassify',
+                'classification_reason': 'V4 rule reclassify',
             })
         else:
             llm_inputs.append((idx, text))
@@ -326,7 +341,7 @@ async def main():
                 'risk_label_level1': result['level1'],
                 'risk_label_level2': result['level2'],
                 'classification_source': result['source'],
-                'classification_reason': 'V3 LLM reclassify',
+                'classification_reason': classification_reason,
             })
         logger.info(
             f"LLM pass: {len(llm_updates)} updated, {llm_failures} failed/low-conf"
@@ -361,6 +376,36 @@ async def main():
                 f.write(json.dumps(r, ensure_ascii=False) + '\n')
         logger.info(f"Wrote {len(leftover)} remaining clue_ids to {out_path}")
 
+    # V4: also check for non-canonical labels written by reclassify.
+    # Safety net for any pre-V4 runs that polluted the DB.
+    logger.info("Phase 3e: scanning for non-canonical labels written by reclassify...")
+    non_canonical = await asyncio.to_thread(
+        db.count_clues_with_non_canonical_label, classification_reason
+    )
+    if non_canonical:
+        bad_path = project_root / 'data' / 'reclassify_non_canonical.jsonl'
+        with open(bad_path, 'w', encoding='utf-8') as f:
+            for r in non_canonical:
+                f.write(json.dumps(r, ensure_ascii=False) + '\n')
+        logger.warning(
+            f"Found {len(non_canonical)} non-canonical labels — wrote to {bad_path}"
+        )
+    else:
+        logger.info("No non-canonical labels — DB clean.")
+
+
+def parse_args():
+    import argparse
+    p = argparse.ArgumentParser(description='Reclassify 未知/其他 clues with V4 rules + LLM')
+    p.add_argument('--days', type=int, default=RECLASSIFY_DAYS,
+                   help=f'Look-back window in days (default: {RECLASSIFY_DAYS})')
+    p.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
+                   help=f'Max clues to process (default: {DEFAULT_LIMIT})')
+    p.add_argument('--reason', type=str, default='V4 LLM reclassify',
+                   help='classification_reason marker for this run (default: V4 LLM reclassify)')
+    return p.parse_args()
+
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    args = parse_args()
+    asyncio.run(main(days=args.days, limit=args.limit, classification_reason=args.reason))

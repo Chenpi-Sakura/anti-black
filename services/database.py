@@ -1262,6 +1262,37 @@ class PostgreSQLService:
             )
             return cur.fetchone()['cnt']
 
+    def count_clues_with_non_canonical_label(
+        self,
+        classification_reason: str,
+    ) -> int:
+        """Count clues written by reclassify but with non-canonical labels.
+
+        V4 hardening: reclassify batches should never leave clues with
+        free-form level1/level2 names. This check is a safety net for
+        runs that happened before the V4 prompt fix.
+        """
+        from pipeline.classifier import Classifier
+        canonical = set(Classifier.LEVEL1_LABELS)
+        with self._get_cursor() as cur:
+            cur.execute(
+                sql.SQL("""
+                    SELECT clue_id, risk_label_level1, risk_label_level2
+                    FROM {}.clues
+                    WHERE classification_reason = %s
+                """).format(sql.Identifier(self.schema)),
+                (classification_reason,),
+            )
+            rows = cur.fetchall()
+        non_canonical = []
+        for r in rows:
+            l1 = r['risk_label_level1']
+            l2 = r['risk_label_level2']
+            l2_canonical = Classifier.CANONICAL_LEVEL2.get(l1, set())
+            if l1 not in canonical or (l2_canonical and l2 not in l2_canonical):
+                non_canonical.append(r)
+        return non_canonical
+
     def get_clues(
         self,
         query_id: Optional[str] = None,
