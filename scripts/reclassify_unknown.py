@@ -79,19 +79,63 @@ def try_rule(text: str, classifier: Classifier) -> Optional[Dict[str, str]]:
 
 
 def build_prompt(text: str) -> str:
-    """Build the V3 Few-Shot prompt (re-uses same template as classify.py)."""
+    """Build the V4 Few-Shot prompt (V4 = explicit enumerated L2 options).
+
+    V3 had a bug: LLM returned free-form level2 names like '纯垃圾',
+    '纯新闻内容' that aren't in the canonical taxonomy. V4 fixes by
+    listing every valid level2 in the prompt and explicitly forbidding
+    free-form names. parse_llm_response() also rejects unknown L2.
+    """
     return f"""你是一个黑灰产情报分类专家。本系统聚焦【字节系黑灰产】（抖音/TikTok/头条/西瓜/飞书/豆包/剪映）。
 
 分析以下文本，判断它属于哪种风险类型。优先看"行话暗号 + 交易特征"，不要因为字面直白就否定。
 
-【风险类别与子类】：
-1. 账号交易 - 账号买卖: 出号/换绑/租号; 代实名服务: 代实名/代过审
-2. 流量作弊 - 刷粉/刷赞/刷量; 直播刷量: 直播刷人气/挂人气; 互刷涨粉/刷评论
-3. 诈骗引流 - 刷单引流/杀猪盘/兼职诈骗; 私域引流: 私域+加粉/拉群; 灰产加盟: 招下线
-4. 黑产工具 - 接码平台/群控工具/改机工具/IP池/猫池/矩阵号/自动化脚本
-5. 灰产洗钱 - 跑分洗钱/四件套交易/代收代付/口令红包/洗钱通道
-6. 未知/其他 - 情报有价值但模型无法分类
-7. 无关 - 纯垃圾：聊天、广告、新闻、不相关游戏
+【风险类别与子类（level1 / level2 必须严格从下列选项中选，绝不可自创新名称）】：
+
+1. 账号交易
+   - 账号买卖
+   - 账号租借
+   - 账号转让
+   - 代实名服务
+
+2. 流量作弊
+   - 刷粉
+   - 刷赞
+   - 刷播放量
+   - 直播刷量
+   - 互刷涨粉
+   - 刷评论
+
+3. 诈骗引流
+   - 刷单引流
+   - 杀猪盘
+   - 兼职诈骗
+   - 私域引流
+   - 灰产加盟
+
+4. 黑产工具
+   - 接码平台
+   - 群控工具
+   - 改机工具
+   - IP池/猫池
+   - 矩阵号
+   - 自动化脚本
+
+5. 灰产洗钱
+   - 跑分洗钱
+   - 四件套交易
+   - 代收代付
+   - 口令红包
+   - 洗钱通道
+
+6. 未知/其他 (level2: 未分类)
+   - 未分类
+
+7. 无关
+   - 噪声数据
+   - 广告推广
+   - 个人闲聊
+   - 不相关游戏/新闻
 
 【关键判断】：
 - "未知/其他" = 情报有价值但分不出来（保留供人工 review）
@@ -99,7 +143,12 @@ def build_prompt(text: str) -> str:
 - 单字/双字高频日常词单独不构成风险判断
 - 字面直白的高频交易词在黑产语境下是有效特征
 
-【Few-Shot 示例】：
+【强制约束】：
+- level1 和 level2 都必须从上述 7 个 level1 之一和对应 level2 中选
+- 绝不可自创 level2 名称（如"纯垃圾"、"纯新闻"、"不相关新闻"等都是非法值）
+- 不知道选什么就输出"未知/其他"+"未分类"
+
+【Few-Shot 示例】（注意 level2 都用预定义名称）：
 "出抖号" → 账号交易/账号买卖
 "万粉号出" → 账号交易/账号买卖
 "刷粉找小妹" → 流量作弊/刷粉
@@ -113,6 +162,8 @@ def build_prompt(text: str) -> str:
 "做自媒体 活跃账号" → 无关/噪声数据
 "王者荣耀开黑" → 无关/不相关游戏/新闻
 "今天天气真好" → 无关/噪声数据
+"d d" → 无关/噪声数据
+"红了八戒" → 无关/噪声数据
 
 文本: {text}
 
@@ -140,8 +191,25 @@ def parse_llm_response(raw: str) -> Optional[Dict[str, str]]:
         return None
     level1 = result.get('level1', '').strip()
     level2 = result.get('level2', '').strip()
+
+    # V4 hardening: validate level1 AND level2 against canonical taxonomy.
+    # Free-form names from LLM (e.g. "纯垃圾", "纯新闻内容") are rejected,
+    # and the result is rerouted to "未知/其他/未分类" as a safe fallback.
     if level1 not in Classifier.LEVEL1_LABELS:
         return None
+    canonical_l2 = Classifier.CANONICAL_LEVEL2.get(level1, set())
+    if canonical_l2 and level2 not in canonical_l2:
+        # V4: reroute to 未知/其他/未分类 instead of letting free-form
+        # names pollute the DB. Log the rejected name for visibility.
+        logger.warning(
+            f"LLM returned non-canonical level2 '{level2}' for level1='{level1}', "
+            f"rerouting to 未知/其他/未分类"
+        )
+        return {
+            'level1': '未知/其他',
+            'level2': '未分类',
+            'confidence': float(result.get('confidence', 0.0)),
+        }
     return {
         'level1': level1,
         'level2': level2 or '未分类',

@@ -316,6 +316,19 @@ class Classifier:
     # V2 命名空间对齐：全链路用中文 Name
     LEVEL1_LABELS = ('账号交易', '流量作弊', '诈骗引流', '黑产工具', '灰产洗钱', '未知/其他', '无关')
 
+    # V4: canonical level2 names per level1 (used by reclassify_unknown.py
+    # to validate LLM output and reject free-form labels).
+    # Single source of truth — keep in sync with config.yaml taxonomy block.
+    CANONICAL_LEVEL2 = {
+        '账号交易': {'账号买卖', '账号租借', '账号转让', '代实名服务'},
+        '流量作弊': {'刷粉', '刷赞', '刷播放量', '直播刷量', '互刷涨粉', '刷评论'},
+        '诈骗引流': {'刷单引流', '杀猪盘', '兼职诈骗', '私域引流', '灰产加盟'},
+        '黑产工具': {'接码平台', '群控工具', '改机工具', 'IP池/猫池', '矩阵号', '自动化脚本'},
+        '灰产洗钱': {'跑分洗钱', '四件套交易', '代收代付', '口令红包', '洗钱通道'},
+        '未知/其他': {'未分类'},
+        '无关': {'噪声数据', '广告推广', '个人闲聊', '不相关游戏/新闻'},
+    }
+
     @staticmethod
     def _normalize_level1_label(label: str) -> str:
         """Map any dirty variant of a level1 label to its canonical form.
