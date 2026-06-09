@@ -164,10 +164,10 @@ class SlangToRuleBridge:
         conn = self._get_conn()
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT s.candidate_id, s.word, s.meaning
+                SELECT s.candidate_word AS candidate_id, s.candidate_word AS word, s.meaning
                 FROM antiblack.slang_candidates s
                 LEFT JOIN antiblack.slang_evaluations e
-                    ON e.slang_candidate_id = s.candidate_id
+                    ON e.slang_candidate_id = s.candidate_word
                 WHERE s.status = 'CONFIRMED'
                   AND e.slang_candidate_id IS NULL
                 ORDER BY s.occurrence_count DESC
