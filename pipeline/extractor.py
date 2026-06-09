@@ -6,6 +6,9 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+import threading
+
+import ahocorasick
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,33 @@ class Extractor:
 
     def __init__(self, slang_mappings: Dict[str, str] = None):
         self.slang_mappings = slang_mappings or {}
+        self._lock = threading.Lock()
+        self._automaton = self._build_automaton()
+
+    def _build_automaton(self):
+        """Build or rebuild the Aho-Corasick automaton from current slang_mappings.
+
+        Single-character slangs are excluded because plain substring
+        matching produces too many false positives in CJK text.
+        Must call .make_automaton() after adding all words.
+        """
+        auto = ahocorasick.Automaton()
+        for key, value in self.slang_mappings.items():
+            if len(key) >= 2:
+                auto.add_word(key, (key, value))
+        if len(auto) > 0:
+            auto.make_automaton()
+        return auto
+
+    def set_slang_mappings(self, new_dict: Dict[str, str]):
+        """Thread-safe update of slang mappings + rebuild AC automaton.
+
+        Called periodically by the daemon to stay in sync with newly
+        CONFIRMED slangs learned via the slang evolution loop.
+        """
+        with self._lock:
+            self.slang_mappings = new_dict
+            self._automaton = self._build_automaton()
 
     def extract(self, message_id: str, text: str, cleaned_text: str = None) -> ExtractionResult:
         """Extract entities from message text."""
@@ -105,9 +135,11 @@ class Extractor:
                     context=self._get_context(text, match.start(), match.end())
                 ))
 
-        # Extract slang mappings
-        for slang_raw, meaning in self.slang_mappings.items():
-            if slang_raw.lower() in text.lower():
+        # Extract slang mappings via AC automaton
+        with self._lock:
+            auto = self._automaton
+        if len(auto) > 0:  # empty automaton = no slang mappings
+            for _, (slang_raw, meaning) in auto.iter(text):
                 slang_mappings.append({
                     'slang_raw': slang_raw,
                     'meaning': meaning
