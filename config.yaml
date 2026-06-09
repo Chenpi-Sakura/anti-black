@@ -247,57 +247,63 @@ auto_evolution:
     retrain_check_interval_hours: 12
 
 # Taxonomy (Risk Classification System)
+# V3 重构：7 个 L1 + 18 个 L2（新增 GRAY_MONEY 和扩展 L2 子类）
+# V2 命名空间对齐：DB/代码/内存全链路用 Name（中文）作为主键，Code 仅作英文注释
 taxonomy:
-  version: "taxonomy_v1"
+  version: "taxonomy_v3"
   categories:
     - level1_code: "ACCOUNT_TRADE"
       level1_name: "账号交易"
       level2_items:
-        - level2_code: "DOUYIN_ACCOUNT_SALE"
-          level2_name: "抖音号买卖"
-        - level2_code: "ACCOUNT_RENTAL"
-          level2_name: "账号租借"
-        - level2_code: "ACCOUNT_TRANSFER"
-          level2_name: "账号转让"
-    - level1_code: "FRAUD_LEADS"
-      level1_name: "诈骗引流"
-      level2_items:
-        - level2_code: "BRUSH_ORDER"
-          level2_name: "刷单引流"
-        - level2_code: "PIG_BUTCHER"
-          level2_name: "杀猪盘"
-        - level2_code: "PART_TIME_FRAUD"
-          level2_name: "兼职诈骗"
+        - { level2_code: "ACCOUNT_SALE", level2_name: "账号买卖" }
+        - { level2_code: "ACCOUNT_RENTAL", level2_name: "账号租借" }
+        - { level2_code: "ACCOUNT_TRANSFER", level2_name: "账号转让" }
+        - { level2_code: "REALNAME_AGENCY", level2_name: "代实名服务" }
     - level1_code: "TRAFFIC_CHEATING"
       level1_name: "流量作弊"
       level2_items:
-        - level2_code: "FAKE_FOLLOWERS"
-          level2_name: "刷粉"
-        - level2_code: "FAKE_LIKES"
-          level2_name: "刷赞"
-        - level2_code: "FAKE_VIEWS"
-          level2_name: "刷播放量"
+        - { level2_code: "FAKE_FOLLOWERS", level2_name: "刷粉" }
+        - { level2_code: "FAKE_LIKES", level2_name: "刷赞" }
+        - { level2_code: "FAKE_VIEWS", level2_name: "刷播放量" }
+        - { level2_code: "LIVE_BOT", level2_name: "直播刷量" }
+        - { level2_code: "INTERACT_BOOST", level2_name: "互刷涨粉" }
+        - { level2_code: "FAKE_COMMENTS", level2_name: "刷评论" }
+    - level1_code: "FRAUD_LEADS"
+      level1_name: "诈骗引流"
+      level2_items:
+        - { level2_code: "BRUSH_ORDER", level2_name: "刷单引流" }
+        - { level2_code: "PIG_BUTCHER", level2_name: "杀猪盘" }
+        - { level2_code: "PART_TIME_FRAUD", level2_name: "兼职诈骗" }
+        - { level2_code: "PRIVATE_LEADS", level2_name: "私域引流" }
+        - { level2_code: "GRAY_JOIN", level2_name: "灰产加盟" }
     - level1_code: "BLACK_TOOL"
       level1_name: "黑产工具"
       level2_items:
-        - level2_code: "PHONE_OTP"
-          level2_name: "接码平台"
-        - level2_code: "BATCH_CONTROL"
-          level2_name: "群控工具"
+        - { level2_code: "PHONE_OTP", level2_name: "接码平台" }
+        - { level2_code: "BATCH_CONTROL", level2_name: "群控工具" }
+        - { level2_code: "DEVICE_MOD", level2_name: "改机工具" }
+        - { level2_code: "IP_POOL", level2_name: "IP池/猫池" }
+        - { level2_code: "MATRIX", level2_name: "矩阵号" }
+        - { level2_code: "SCRIPTS", level2_name: "自动化脚本" }
+    - level1_code: "GRAY_MONEY"
+      level1_name: "灰产洗钱"
+      level2_items:
+        - { level2_code: "SCORE_RUNNING", level2_name: "跑分洗钱" }
+        - { level2_code: "FOUR_PIECE", level2_name: "四件套交易" }
+        - { level2_code: "PROXY_PAY", level2_name: "代收代付" }
+        - { level2_code: "PASSWORD_RED", level2_name: "口令红包" }
+        - { level2_code: "MONEY_CHANNEL", level2_name: "洗钱通道" }
     - level1_code: "UNKNOWN"
       level1_name: "未知/其他"
       level2_items:
-        - level2_code: "UNCATEGORIZED"
-          level2_name: "未分类"
+        - { level2_code: "UNCATEGORIZED", level2_name: "未分类" }
     - level1_code: "IRRELEVANT"
       level1_name: "无关"
       level2_items:
-        - level2_code: "NORMAL_CONTENT"
-          level2_name: "普通内容"
-        - level2_code: "ADVERTISEMENT"
-          level2_name: "广告"
-        - level2_code: "NOISE"
-          level2_name: "噪声"
+        - { level2_code: "NOISE", level2_name: "噪声数据" }
+        - { level2_code: "AD", level2_name: "广告推广" }
+        - { level2_code: "CHITCHAT", level2_name: "个人闲聊" }
+        - { level2_code: "OFF_TOPIC", level2_name: "不相关游戏/新闻" }
 
 # Seed Words Configuration
 seed_words:
