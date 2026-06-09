@@ -1188,6 +1188,80 @@ class PostgreSQLService:
                 sql.Identifier(self.schema)), (clue_id,))
             return cur.fetchone()
 
+    def bulk_update_clue_labels(
+        self,
+        updates: List[Dict[str, Any]],
+        chunk_size: int = 500,
+    ) -> int:
+        """Bulk update risk labels for many clues in chunks.
+
+        V3 hardening: each chunk commits independently to avoid long
+        transactions locking the clues table. Caller should pass
+        updates as [{'clue_id': ..., 'risk_label_level1': ...,
+                    'risk_label_level2': ..., 'classification_source': ...,
+                    'classification_reason': ...}, ...].
+
+        Returns the number of rows successfully updated.
+        """
+        if not updates:
+            return 0
+        total_updated = 0
+        with self._get_cursor() as cur:
+            for i in range(0, len(updates), chunk_size):
+                chunk = updates[i:i + chunk_size]
+                try:
+                    for u in chunk:
+                        cur.execute(
+                            sql.SQL("""
+                                UPDATE {}.clues
+                                SET risk_label_level1 = %s,
+                                    risk_label_level2 = %s,
+                                    classification_source = %s,
+                                    classification_reason = %s
+                                WHERE clue_id = %s
+                            """).format(sql.Identifier(self.schema)),
+                            (
+                                u.get('risk_label_level1'),
+                                u.get('risk_label_level2'),
+                                u.get('classification_source'),
+                                u.get('classification_reason'),
+                                u['clue_id'],
+                            ),
+                        )
+                    cur.connection.commit()
+                    total_updated += len(chunk)
+                except Exception as e:
+                    cur.connection.rollback()
+                    logger.error(
+                        f"bulk_update_clue_labels chunk {i//chunk_size} "
+                        f"({len(chunk)} rows) failed: {e}"
+                    )
+        return total_updated
+
+    def count_clues_with_label(
+        self,
+        clue_ids: List[str],
+        label_level1: str,
+    ) -> int:
+        """Count how many of the given clue_ids still have the specified L1 label.
+
+        Used by reclassify scripts to verify completeness after a
+        bulk reclassification run.
+        """
+        if not clue_ids:
+            return 0
+        with self._get_cursor() as cur:
+            cur.execute(
+                sql.SQL("""
+                    SELECT COUNT(*) as cnt
+                    FROM {}.clues
+                    WHERE risk_label_level1 = %s
+                      AND clue_id = ANY(%s)
+                """).format(sql.Identifier(self.schema)),
+                (label_level1, list(clue_ids)),
+            )
+            return cur.fetchone()['cnt']
+
     def get_clues(
         self,
         query_id: Optional[str] = None,
