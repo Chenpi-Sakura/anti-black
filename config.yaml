@@ -31,7 +31,7 @@ kafka:
   # Consumer settings
   consumer:
     auto_offset_reset: "earliest"
-    enable_auto_commit: true
+    enable_auto_commit: false
     max_poll_records: 100
   # Producer settings
   producer:

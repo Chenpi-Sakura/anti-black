@@ -195,13 +195,8 @@ class DaemonScheduler:
 
         consumer = self.kafka_manager.get_consumer(topic, group_id)
         await consumer.start()
-        # Disable auto-commit; we commit manually after each batch is processed.
-        # Without this, auto-commit fires every 5s and could commit BEFORE
-        # the batch finishes, causing re-consume on restart.
-        try:
-            consumer._consumer._auto_commit = False
-        except Exception:
-            pass
+        # Manual commit via config.yaml kafka.consumer.enable_auto_commit = false.
+        # Never auto-commit before our batch work finishes.
 
         while self._running:
             try:
