@@ -518,7 +518,7 @@ class Classifier:
             # Build ClassificationResult
             level1_label = result.get('level1', '未知/其他')
             level2_label = result.get('level2', '未分类')
-            confidence = float(result.get('confidence', 0.5))
+            confidence = max(0.0, min(1.0, float(result.get('confidence', 0.5))))
 
             classification_result = ClassificationResult(
                 level1_label=level1_label,
@@ -622,9 +622,12 @@ class Classifier:
             LLM_BATCH = 4
             chunked = [llm_texts[i:i + LLM_BATCH] for i in range(0, len(llm_texts), LLM_BATCH)]
             # Launch all chunks in parallel; pacing throttles the start rate
-            chunk_results = await asyncio.gather(*[one_chunk_call(c) for c in chunked])
+            chunk_results = await asyncio.gather(*[one_chunk_call(c) for c in chunked], return_exceptions=True)
             llm_raw_results: List[str] = []
             for cr in chunk_results:
+                if isinstance(cr, Exception):
+                    logger.error(f"LLM chunk failed: {cr}", exc_info=True)
+                    continue
                 llm_raw_results.extend(cr)
 
             for j, raw in enumerate(llm_raw_results):
@@ -648,7 +651,7 @@ class Classifier:
                 results[original_idx] = ClassificationResult(
                     level1_label=d.get("level1", "未知/其他") or "未知/其他",
                     level2_label=d.get("level2", "未分类") or "未分类",
-                    confidence=float(d.get("confidence", 0.5) or 0.5),
+                    confidence=max(0.0, min(1.0, float(d.get("confidence", 0.5) or 0.5))),
                     source="llm",
                     reason=d.get("reason", ""),
                 )
