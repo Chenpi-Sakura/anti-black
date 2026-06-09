@@ -557,6 +557,22 @@ class DaemonScheduler:
                 if confirmed:
                     await self._persist_confirmed_slang(confirmed)
                     logger.info(f"LLM validated {len(confirmed)} new CONFIRMED slang")
+                    # 新 CONFIRMED 词已写入 slang_mappings 表，
+                    # 刷新 extractor 的 AC 自动机以便立即匹配。
+                    if self._extractor:
+                        # _known_words 是 Set[str]，需要从 DB 加载完整的 (word, meaning) 字典
+                        from services.database import PostgreSQLService
+                        _pg = PostgreSQLService.get_instance()
+                        fresh_mappings = await asyncio.to_thread(_pg.get_all_slang_mappings, True)
+                        fresh_dict = {m['slang_raw']: m['meaning']
+                                      for m in fresh_mappings if m.get('slang_raw')}
+                        if fresh_dict:
+                            logger.info(
+                                f"Refreshing extractor with {len(fresh_dict)} slang mappings"
+                            )
+                            await asyncio.to_thread(
+                                self._extractor.set_slang_mappings, fresh_dict
+                            )
 
                 # 末位淘汰：命中率 < 5% 且出现 ≥ 200 次的 CONFIRMED/STABLE
                 eliminated = await self._slang_learner.eliminate_weak_slangs()
