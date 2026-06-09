@@ -1108,7 +1108,7 @@ class PostgreSQLService:
         for i, (k, v) in enumerate(updates.items()):
             set_clauses.append(f"{k} = %({k})s")
             if isinstance(v, (dict, list)):
-                params[k] = json.dumps(v)
+                params[k] = json.dumps(v, ensure_ascii=False)
             else:
                 params[k] = v
 
@@ -1706,7 +1706,7 @@ class PostgreSQLService:
         for k, v in updates.items():
             set_clauses.append(f"{k} = %({k})s")
             if isinstance(v, (dict, list)):
-                params[k] = json.dumps(v)
+                params[k] = json.dumps(v, ensure_ascii=False)
             else:
                 params[k] = v
 
