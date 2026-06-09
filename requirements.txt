@@ -39,6 +39,10 @@ pytest-asyncio>=0.21.0
 python-dotenv>=1.0.0
 jieba>=0.42.1
 
+# Pipeline enhancements
+simhash>=2.1.0
+pyahocorasick>=2.0.0
+
 # Crawler helpers (Windows only)
 # 用于 scripts/auto_click_cdp_dialog.py 自动点击 Chrome CDP 授权弹窗
 pyautogui>=0.9.50; sys_platform == "win32"
