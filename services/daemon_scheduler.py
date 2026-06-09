@@ -232,14 +232,17 @@ class DaemonScheduler:
                 # a single bad message would re-consume forever (poison pill).
                 logger.error(f"Kafka consume error: {e}", exc_info=True)
                 try:
-                    await self._send_to_dlq(topic, batch, str(e))
+                    written = await self._send_to_dlq(topic, batch, str(e))
+                    total_records = len(batch) if isinstance(batch, list) else sum(len(r) for r in batch.values())
+                    if written < total_records:
+                        logger.warning(
+                            f"DLQ partially succeeded ({written}/{total_records}); "
+                            f"skipping consumer commit so failed records retry"
+                        )
+                    else:
+                        await consumer.commit()
                 except Exception as dlq_err:
                     logger.error(f"DLQ write also failed: {dlq_err}", exc_info=True)
-                # Commit anyway so we move past the poison batch
-                try:
-                    await consumer.commit()
-                except Exception as commit_err:
-                    logger.error(f"Commit after DLQ failed: {commit_err}")
                 await asyncio.sleep(1)
 
     async def _process_kafka_message(self, msg: Dict[str, Any]):
