@@ -9,6 +9,9 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
+# 防御性编程：超长消息直接丢弃（DoS 防护）
+MAX_TEXT_LENGTH = 10_000
+
 
 class CleanedMessage:
     """Cleaned message object."""
@@ -40,7 +43,7 @@ class Cleaner:
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
         self.dedup_window_hours = self.config.get('cleaning', {}).get('dedup_window_hours', 24)
-        self.simhash_threshold = self.config.get('cleaning', {}).get('simhash_threshold', 3)
+        self.simhash_threshold = self.config.get('cleaning', {}).get('simhash_threshold', 12)
 
         # In-memory deduplication cache
         self._exact_hash_cache: Set[str] = set()
@@ -74,6 +77,11 @@ class Cleaner:
 
         # Skip empty messages
         if not original_text or not original_text.strip():
+            return None
+
+        # DoS 防护：超长消息直接丢弃
+        if len(original_text) > MAX_TEXT_LENGTH:
+            logger.warning(f"Message exceeds MAX_TEXT_LENGTH ({len(original_text)} > {MAX_TEXT_LENGTH}): {message_id}")
             return None
 
         # Normalize text
@@ -153,10 +161,14 @@ class Cleaner:
         return hashlib.md5(text.encode('utf-8')).hexdigest()
 
     def _compute_simhash(self, text: str) -> int:
-        """Compute SimHash."""
-        import struct
-        hash_bytes = hashlib.md5(text.encode('utf-8')).digest()
-        return struct.unpack('<Q', hash_bytes[:8])[0]
+        """Compute SimHash for Chinese text.
+
+        Uses character-level (1-gram) tokenization since the default
+        Simhash tokenizer splits on whitespace, which treats an entire
+        Chinese sentence as a single token.
+        """
+        from simhash import Simhash
+        return Simhash(list(text)).value
 
     def _is_approx_duplicate(self, simhash: int) -> bool:
         """Check if simhash is approximate duplicate."""
