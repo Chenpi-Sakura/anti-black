@@ -195,7 +195,7 @@ async def main():
     classifier = Classifier(config)
 
     logger.info("Phase 3a: fetching 未知/其他 clues (last 7d)...")
-    rows = fetch_unknown_clue_ids(db, RCLASSIFY_DAYS, limit=20000)
+    rows = fetch_unknown_clue_ids(db, RECLASSIFY_DAYS, limit=20000)
     logger.info(f"Fetched {len(rows)} clues")
     if not rows:
         return
