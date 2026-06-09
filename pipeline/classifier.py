@@ -68,28 +68,54 @@ class ClassificationResult:
 
 
 class ClassificationRule:
-    """Single classification rule."""
+    """Single classification rule.
 
-    def __init__(self, patterns: List[str], level1: str, level2: str, confidence: float = 0.9):
+    V2 加固（防假阳性）：
+    - patterns 是强词（任一出现即触发候选匹配）
+    - co_occurrence_keywords 是弱词（必须至少 1 配才真正匹配）
+    - 单字/双字高频日常词（私聊、加我）单独不触发，避免假阳性
+    """
+
+    def __init__(
+        self,
+        patterns: List[str],
+        level1: str,
+        level2: str,
+        confidence: float = 0.9,
+        co_occurrence_keywords: Optional[List[str]] = None,
+        exclude_keywords: Optional[List[str]] = None,
+    ):
         self.patterns = patterns
         self.level1 = level1
         self.level2 = level2
         self.confidence = confidence
+        self.co_occurrence_keywords = co_occurrence_keywords or []
+        self.exclude_keywords = exclude_keywords or []
 
     def match(self, text: str) -> bool:
-        """Check if text matches this rule."""
-        for pattern in self.patterns:
-            if pattern in text.lower():
-                return True
-        return False
+        text_lower = text.lower()
+        # 1) 强词必须至少 1 命中
+        if not any(p in text_lower for p in self.patterns):
+            return False
+        # 2) 弱词必须至少 1 配
+        if self.co_occurrence_keywords:
+            if not any(w in text_lower for w in self.co_occurrence_keywords):
+                return False
+        # 3) 排除词不能出现
+        if self.exclude_keywords:
+            if any(e in text_lower for e in self.exclude_keywords):
+                return False
+        return True
 
 
 class Classifier:
     """Multi-stage classifier with rule/model/LLM fallback."""
 
     # Predefined rules from taxonomy
+    # V2 加固：高频弱词必须配对（co_occurrence_keywords），单字/双字
+    # 日常词单独不触发，避免 IRRELEVANT/广告 误判。
     DEFAULT_RULES = [
-        # Account trading rules
+        # ========== 账号交易 ==========
         ClassificationRule(
             patterns=['出号', '换绑', '租号', '抖号', '快手号', '微信号'],
             level1='账号交易',
@@ -102,7 +128,14 @@ class Classifier:
             level2='账号买卖',
             confidence=0.95
         ),
-        # Traffic cheating rules
+        ClassificationRule(
+            patterns=['代实名', '代实名认证', '代过审', '实名代过'],
+            level1='账号交易',
+            level2='代实名服务',
+            confidence=0.92
+        ),
+
+        # ========== 流量作弊 ==========
         ClassificationRule(
             patterns=['刷粉', '涨粉', '千粉', '万粉', '粉丝'],
             level1='流量作弊',
@@ -115,7 +148,26 @@ class Classifier:
             level2='刷赞',
             confidence=0.9
         ),
-        # Fraud rules
+        ClassificationRule(
+            patterns=['直播刷人气', '直播间人气', '挂人气', '直播挂'],
+            level1='流量作弊',
+            level2='直播刷量',
+            confidence=0.9
+        ),
+        ClassificationRule(
+            patterns=['互刷涨粉', '互关群', '互赞群', '互刷群'],
+            level1='流量作弊',
+            level2='互刷涨粉',
+            confidence=0.9
+        ),
+        ClassificationRule(
+            patterns=['刷评论', '刷弹幕', '刷留言'],
+            level1='流量作弊',
+            level2='刷评论',
+            confidence=0.9
+        ),
+
+        # ========== 诈骗引流 ==========
         ClassificationRule(
             patterns=['刷单', '兼职', '佣金'],
             level1='诈骗引流',
@@ -128,7 +180,28 @@ class Classifier:
             level2='杀猪盘',
             confidence=0.85
         ),
-        # Black tools rules
+        ClassificationRule(
+            patterns=['兼职日结', '点赞兼职', '关注兼职', '刷单兼职'],
+            level1='诈骗引流',
+            level2='兼职诈骗',
+            confidence=0.9
+        ),
+        # V2 加固：私域 + 弱词配对
+        ClassificationRule(
+            patterns=['私域引流', '私域变现', '引流变现', '私域运营', '私域'],
+            co_occurrence_keywords=['加粉', '引粉', '拉群', '微信群', '加微'],
+            level1='诈骗引流',
+            level2='私域引流',
+            confidence=0.88
+        ),
+        ClassificationRule(
+            patterns=['灰产加盟', '灰产项目', '招下线', '诚邀加盟'],
+            level1='诈骗引流',
+            level2='灰产加盟',
+            confidence=0.9
+        ),
+
+        # ========== 黑产工具 ==========
         ClassificationRule(
             patterns=['接码', '验证码', '手机号'],
             level1='黑产工具',
@@ -136,10 +209,93 @@ class Classifier:
             confidence=0.9
         ),
         ClassificationRule(
+            patterns=['矩阵号', '矩阵养号', '批量注册', '群控矩阵'],
+            level1='黑产工具',
+            level2='矩阵号',
+            confidence=0.9
+        ),
+        ClassificationRule(
             patterns=['群控', '脚本', '自动化'],
+            exclude_keywords=['矩阵号'],
             level1='黑产工具',
             level2='群控工具',
             confidence=0.9
+        ),
+        ClassificationRule(
+            patterns=['改机工具', '改机软件', '机型伪装', '串改imei', '串号伪装'],
+            level1='黑产工具',
+            level2='改机工具',
+            confidence=0.9
+        ),
+        ClassificationRule(
+            patterns=['ip池', '猫池', 'ip代理', '动态ip', 'ip轮换'],
+            level1='黑产工具',
+            level2='IP池/猫池',
+            confidence=0.9
+        ),
+        ClassificationRule(
+            patterns=['云手机', '批量脚本', '自动化群控', '云控'],
+            level1='黑产工具',
+            level2='自动化脚本',
+            confidence=0.88
+        ),
+
+        # ========== 灰产洗钱 ==========
+        ClassificationRule(
+            patterns=['跑分', '跑分平台', '跑分兼职', '跑分赚钱', '跑分日结'],
+            level1='灰产洗钱',
+            level2='跑分洗钱',
+            confidence=0.92
+        ),
+        ClassificationRule(
+            patterns=['四件套', '银行卡四件套', 'u盾四件套', '网银四件套'],
+            level1='灰产洗钱',
+            level2='四件套交易',
+            confidence=0.92
+        ),
+        ClassificationRule(
+            patterns=['代收代付', '对公账户代收', '海外代收', 'u商代收'],
+            level1='灰产洗钱',
+            level2='代收代付',
+            confidence=0.9
+        ),
+        ClassificationRule(
+            patterns=['口令红包', '微信口令', '抢口令', '口令'],
+            level1='灰产洗钱',
+            level2='口令红包',
+            confidence=0.88
+        ),
+        ClassificationRule(
+            patterns=['洗钱通道', '跑分通道', 'u商', '对公账户'],
+            level1='灰产洗钱',
+            level2='洗钱通道',
+            confidence=0.85
+        ),
+
+        # ========== 无关（IRRELEVANT）==========
+        # V2 加固：噪声强词单独即可（无歧义）
+        ClassificationRule(
+            patterns=['测试一下', '哈哈', '呵呵', '啊啊', '哦哦', '嘻嘻', '呵呵呵'],
+            level1='无关',
+            level2='噪声数据',
+            confidence=0.9
+        ),
+        # 强词：广招代理/诚招代理/高佣 → 直接判定
+        ClassificationRule(
+            patterns=['广招代理', '诚招代理', '高佣', '诚邀加入'],
+            co_occurrence_keywords=['加我', 'v我', '私聊', '私信'],
+            level1='无关',
+            level2='广告推广',
+            confidence=0.85
+        ),
+        # 弱词配对：游戏强词但必须无黑产强词
+        ClassificationRule(
+            patterns=['王者荣耀开黑', '吃鸡上分', '原神开荒', 'steam联机'],
+            co_occurrence_keywords=['王者荣耀', '吃鸡', '原神', 'steam'],
+            exclude_keywords=['跑分', '代收', '日结', '口令', '私域', '刷粉', '万粉', '刷量', '改机', 'ip池', '矩阵', '代实名', '群控', '接码'],
+            level1='无关',
+            level2='不相关游戏/新闻',
+            confidence=0.85
         ),
     ]
 
