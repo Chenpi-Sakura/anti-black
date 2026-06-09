@@ -312,7 +312,9 @@ class Classifier:
         self._load_embedding_model()
 
     # Standard level1 labels (single source of truth)
-    LEVEL1_LABELS = ('账号交易', '流量作弊', '诈骗引流', '黑产工具', '未知/其他')
+    # V3 重构：6 有效 L1 + 未知/其他（情报有价值但分不出来）+ 无关（纯垃圾）
+    # V2 命名空间对齐：全链路用中文 Name
+    LEVEL1_LABELS = ('账号交易', '流量作弊', '诈骗引流', '黑产工具', '灰产洗钱', '未知/其他', '无关')
 
     @staticmethod
     def _normalize_level1_label(label: str) -> str:
