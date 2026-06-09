@@ -267,6 +267,8 @@ class PostgreSQLService:
                 entity_type VARCHAR(50) NOT NULL,
                 raw_value TEXT NOT NULL,
                 normalized_value TEXT,
+                entity_name VARCHAR(255),
+                description TEXT,
                 first_seen TIMESTAMP DEFAULT NOW(),
                 last_seen TIMESTAMP DEFAULT NOW(),
                 occurrence_count INTEGER DEFAULT 0,
@@ -478,6 +480,7 @@ class PostgreSQLService:
                 current_model_version VARCHAR(50) DEFAULT 'v0.0.0',
                 retrain_status VARCHAR(50) DEFAULT 'IDLE',
                 retrain_trigger_threshold INTEGER DEFAULT 2000,
+                last_retrain_silver_total INTEGER DEFAULT 0,
                 last_retrain_at TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT NOW()
             )
@@ -493,12 +496,91 @@ class PostgreSQLService:
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()
             )
+            """,
+
+            # slang_evaluations table (slang -> rule bridge)
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.slang_evaluations (
+                slang_candidate_id VARCHAR(255) PRIMARY KEY,
+                eval_status VARCHAR(50),
+                suggested_level1 VARCHAR(100),
+                suggested_keywords JSONB,
+                llm_confidence FLOAT,
+                eval_json JSONB,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # dynamic_rules table (adopted slang-derived rules)
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.dynamic_rules (
+                rule_id VARCHAR(50) PRIMARY KEY,
+                slang_candidate_id VARCHAR(255),
+                level1_label VARCHAR(100),
+                level2_label VARCHAR(100),
+                keywords JSONB,
+                source VARCHAR(50) DEFAULT 'llm_bridge',
+                hit_count INTEGER DEFAULT 0,
+                correct_count INTEGER DEFAULT 0,
+                last_hit_at TIMESTAMP,
+                is_enabled BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # pending_category_proposals table (unknown_discovery)
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.pending_category_proposals (
+                proposal_id VARCHAR(50) PRIMARY KEY,
+                cluster_id VARCHAR(50),
+                proposed_level1 VARCHAR(100),
+                proposed_level2 VARCHAR(100),
+                chain_of_thought TEXT,
+                llm_confidence FLOAT,
+                sample_texts JSONB,
+                sample_size INTEGER,
+                embedding vector(1024),
+                status VARCHAR(50) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # error_book table (high-confidence clue sampling)
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.error_book (
+                error_id VARCHAR(50) PRIMARY KEY,
+                clue_id VARCHAR(50),
+                original_label VARCHAR(100),
+                llm_label VARCHAR(100),
+                reason TEXT,
+                used_for_training BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+            """,
+
+            # training_samples table (model retraining)
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.training_samples (
+                sample_id VARCHAR(50) PRIMARY KEY,
+                text TEXT,
+                label VARCHAR(100),
+                label_source VARCHAR(50),
+                confidence FLOAT,
+                collection_context JSONB,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
             """
         ]
 
         with self._get_cursor() as cur:
             for table_def in table_defs:
                 cur.execute(table_def)
+
+            # ALTERs for pre-existing tables (idempotent: ADD COLUMN IF NOT EXISTS
+            # only adds if missing; existing columns are silently skipped).
+            # These cover columns referenced by code but missing from older schemas.
+            cur.execute(f"ALTER TABLE {schema}.entities ADD COLUMN IF NOT EXISTS entity_name VARCHAR(255)")
+            cur.execute(f"ALTER TABLE {schema}.entities ADD COLUMN IF NOT EXISTS description TEXT")
 
         logger.info(f"Created {len(table_defs)} tables in schema '{schema}'")
 
