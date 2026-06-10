@@ -97,13 +97,13 @@ onMounted(async () => {
 }
 
 .logo {
-  font-size: 24px;
+  font-size: var(--font-size-xxl);
   color: var(--color-primary);
   font-family: var(--font-serif);
 }
 
 .system-title {
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -122,7 +122,7 @@ onMounted(async () => {
   padding: var(--spacing-xs) var(--spacing-sm);
   color: var(--color-text-secondary);
   text-decoration: none;
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   border-radius: var(--radius-sm);
   transition: all var(--duration-normal) var(--ease-out-quint);
   white-space: nowrap;
@@ -164,7 +164,7 @@ onMounted(async () => {
 }
 
 .status-text {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
 

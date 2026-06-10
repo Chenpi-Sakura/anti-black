@@ -28,14 +28,14 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: 0.01em;
 }
 
-h1 { font-size: 24px; }
-h2 { font-size: 21px; }
-h3 { font-size: 17px; }
-h4 { font-size: 15px; }
+h1 { font-size: var(--font-size-xxl); }
+h2 { font-size: var(--font-size-xl); }
+h3 { font-size: var(--font-size-lg); }
+h4 { font-size: var(--font-size-base); }
 
 code, pre {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 /* Scrollbar styling */

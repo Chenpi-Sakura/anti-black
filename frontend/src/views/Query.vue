@@ -382,6 +382,12 @@ function goToClueDetail(clueId) {
   min-width: 0;
   overflow: hidden;
   max-height: 100%;
+  /* Cap the content width so the report / input don't span the entire
+     viewport. Auto margin keeps the column centered with symmetric gutters
+     when the sidebar is collapsed. */
+  max-width: 1600px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .query-header {
@@ -390,13 +396,13 @@ function goToClueDetail(clueId) {
 }
 
 .section-title {
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   font-weight: 600;
   margin: 0 0 2px 0;
 }
 
 .subtitle {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
@@ -404,7 +410,7 @@ function goToClueDetail(clueId) {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
-  padding-right: var(--spacing-xs);
+  padding: 0 var(--spacing-md);
   scroll-behavior: smooth;
 }
 
@@ -421,7 +427,7 @@ function goToClueDetail(clueId) {
 }
 
 .welcome-message p {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   margin-bottom: var(--spacing-md);
 }
@@ -437,7 +443,7 @@ function goToClueDetail(clueId) {
   padding: 10px 18px;
   background: var(--color-primary-subtle);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--color-primary);
   cursor: pointer;
   transition: all var(--duration-normal) var(--ease-out-quint);
@@ -471,7 +477,7 @@ function goToClueDetail(clueId) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   flex-shrink: 0;
 }
 
@@ -521,7 +527,7 @@ function goToClueDetail(clueId) {
   align-items: center;
   gap: 8px;
   padding: 4px 0 4px 4px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   line-height: 1.5;
 }
@@ -547,7 +553,7 @@ function goToClueDetail(clueId) {
 .step-label { flex: 1; }
 
 .step-tool {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   padding: 1px 6px;
   background: var(--color-primary-subtle);
   color: var(--color-primary);
@@ -593,7 +599,7 @@ function goToClueDetail(clueId) {
 }
 
 .results-header h3 {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
 }
 

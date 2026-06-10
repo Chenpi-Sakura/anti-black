@@ -78,7 +78,7 @@ function formatTime(timeStr) {
 .clue-risk {
   font-weight: 500;
   color: var(--color-primary);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .risk-arrow {
@@ -87,7 +87,7 @@ function formatTime(timeStr) {
 }
 
 .clue-confidence {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   padding: 2px 8px;
   background: var(--color-primary-subtle);
@@ -95,7 +95,7 @@ function formatTime(timeStr) {
 }
 
 .clue-text {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-primary);
   margin-bottom: var(--spacing-xs);
   overflow: hidden;
@@ -111,7 +111,7 @@ function formatTime(timeStr) {
 }
 
 .entity-tag {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   padding: 2px 6px;
   background: var(--color-primary-subtle);
   border-radius: 3px;
@@ -121,7 +121,7 @@ function formatTime(timeStr) {
 .clue-footer {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 </style>

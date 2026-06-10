@@ -198,7 +198,7 @@ onMounted(() => {
 
 .muted {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 @media (max-width: 1024px) {

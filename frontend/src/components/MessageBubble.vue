@@ -101,7 +101,7 @@ function formatTime(time) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   flex-shrink: 0;
 }
 
@@ -129,7 +129,7 @@ function formatTime(time) {
 .message-text {
   line-height: 1.7;
   word-break: break-word;
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   overflow: visible;
   width: 100%;
 }
@@ -153,7 +153,7 @@ function formatTime(time) {
 .message-text :deep(li) { margin: 0.35em 0; line-height: 1.6; }
 .message-text :deep(li > ul), .message-text :deep(li > ol) { margin: 0.25em 0; }
 .message-text :deep(table) {
-  border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 13px;
+  border-collapse: collapse; width: 100%; margin: 1em 0; font-size: var(--font-size-sm);
   overflow: visible; border: 1px solid #dfe2e5;
 }
 .message-text :deep(table th), .message-text :deep(table td) {
@@ -165,7 +165,7 @@ function formatTime(time) {
   background: #f6f8fa; padding: 12px 16px; border-radius: 6px;
   overflow-x: auto; margin: 0.8em 0; border: 1px solid var(--color-border);
 }
-.message-text :deep(pre code) { background: none; padding: 0; color: inherit; font-size: 13px; }
+.message-text :deep(pre code) { background: none; padding: 0; color: inherit; font-size: var(--font-size-sm); }
 .message-text :deep(blockquote) {
   border-left: 3px solid var(--color-primary); margin: 0.8em 0;
   padding: 8px 16px; color: var(--color-text-secondary);
@@ -181,7 +181,7 @@ function formatTime(time) {
 }
 
 .message-time {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   margin-top: 4px;
 }
@@ -198,7 +198,7 @@ function formatTime(time) {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
@@ -206,7 +206,7 @@ function formatTime(time) {
 }
 
 .reasoning-toggle {
-  font-size: 10px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
@@ -214,7 +214,7 @@ function formatTime(time) {
 .reasoning-summary { flex: 1; }
 
 .reasoning-duration {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   background: var(--color-divider);
   padding: 1px 6px;
@@ -233,7 +233,7 @@ function formatTime(time) {
   align-items: center;
   gap: 8px;
   padding: 4px 0 4px 4px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-secondary);
   line-height: 1.5;
 }
@@ -249,7 +249,7 @@ function formatTime(time) {
 .step-label { flex: 1; }
 
 .step-tool {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   padding: 1px 6px;
   background: var(--color-primary-subtle);
   color: var(--color-primary);

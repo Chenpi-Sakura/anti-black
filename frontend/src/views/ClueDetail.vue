@@ -251,13 +251,13 @@ onMounted(async () => {
 }
 
 .risk-label {
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   font-weight: 500;
   color: var(--color-primary);
 }
 
 .confidence {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   padding: 4px 12px;
   background: var(--color-primary-subtle);
   border-radius: 4px;
@@ -268,13 +268,13 @@ onMounted(async () => {
 }
 
 .text-section h4 {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   margin-bottom: var(--spacing-xs);
 }
 
 .raw-text, .cleaned-text {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   line-height: 1.8;
   padding: var(--spacing-sm);
   background: var(--color-background);
@@ -284,7 +284,7 @@ onMounted(async () => {
 .meta-info {
   display: flex;
   gap: var(--spacing-md);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
 
@@ -321,7 +321,7 @@ onMounted(async () => {
 }
 
 .entity-type {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   padding: 2px 6px;
   background: var(--color-primary);
   color: white;
@@ -330,16 +330,16 @@ onMounted(async () => {
 
 .entity-value {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--font-size-sm);
 }
 
 .entity-source {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
 .slang-raw {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-primary);
 }
 
@@ -348,7 +348,7 @@ onMounted(async () => {
 }
 
 .slang-meaning {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
 }
 
 .detail-sidebar {

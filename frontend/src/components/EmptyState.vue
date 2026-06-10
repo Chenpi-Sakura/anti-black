@@ -37,7 +37,7 @@ defineProps({
 }
 
 .empty-description {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   margin: 0 0 var(--spacing-sm) 0;
 }
 

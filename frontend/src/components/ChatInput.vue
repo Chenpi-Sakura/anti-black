@@ -41,6 +41,11 @@ const emit = defineEmits(['update:modelValue', 'submit'])
 .input-section {
   padding: var(--spacing-md) 0 0 0;
   flex-shrink: 0;
+  /* Cap input width to keep the textarea from spanning the whole
+     1080px main-content column. Auto-margin centers it. */
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .input-wrapper {
@@ -64,7 +69,7 @@ const emit = defineEmits(['update:modelValue', 'submit'])
 }
 
 .hint-text {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 </style>

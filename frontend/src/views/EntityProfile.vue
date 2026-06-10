@@ -147,7 +147,7 @@ onMounted(async () => {
 }
 
 .entity-type-badge {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   padding: 4px 12px;
   background: var(--color-primary);
   color: white;
@@ -155,7 +155,7 @@ onMounted(async () => {
 }
 
 .entity-value {
-  font-size: 20px;
+  font-size: var(--font-size-xl);
   font-weight: 500;
 }
 
@@ -173,13 +173,13 @@ onMounted(async () => {
 
 .stat-value {
   display: block;
-  font-size: 18px;
+  font-size: var(--font-size-lg);
   font-weight: 500;
   color: var(--color-primary);
 }
 
 .stat-label {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
@@ -210,11 +210,11 @@ onMounted(async () => {
 }
 
 .risk-label {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
 }
 
 .risk-count {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-primary);
   font-weight: 500;
 }
@@ -233,7 +233,7 @@ onMounted(async () => {
 }
 
 .entity-type {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   padding: 2px 6px;
   background: var(--color-primary);
   color: white;
@@ -241,17 +241,17 @@ onMounted(async () => {
 }
 
 .entity-value {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
 }
 
 .evidence-time {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
 }
 
 .evidence-snippet {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

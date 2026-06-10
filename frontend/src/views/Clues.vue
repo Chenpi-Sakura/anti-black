@@ -326,14 +326,14 @@ onMounted(async () => {
 }
 
 .clue-confidence {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   padding: 2px 8px;
   background: var(--color-primary-subtle);
   border-radius: 2px;
 }
 
 .clue-text {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-primary);
   margin-bottom: var(--spacing-sm);
   overflow: hidden;
@@ -349,7 +349,7 @@ onMounted(async () => {
 }
 
 .entity-tag {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   padding: 2px 8px;
   background: var(--color-primary-subtle);
   border-radius: 2px;
@@ -360,7 +360,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: var(--spacing-md);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 

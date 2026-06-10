@@ -203,13 +203,13 @@ onMounted(() => {
 .distribution-label {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-primary);
 }
 
 .distribution-count {
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .distribution-bar-container {
@@ -238,12 +238,12 @@ onMounted(() => {
 }
 
 .channel-name {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-primary);
 }
 
 .channel-status {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   padding: 2px 8px;
   border-radius: var(--radius-sm);
 }

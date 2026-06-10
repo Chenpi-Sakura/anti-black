@@ -51,12 +51,12 @@ defineProps({
 }
 
 .header-icon {
-  font-size: 16px;
+  font-size: var(--font-size-base);
   color: var(--color-primary);
 }
 
 .card-title {
-  font-size: 16px;
+  font-size: var(--font-size-base);
   font-weight: 500;
   color: var(--color-text-primary);
   margin: 0;

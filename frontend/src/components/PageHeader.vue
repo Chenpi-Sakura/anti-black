@@ -34,14 +34,14 @@ defineProps({
 }
 
 .page-title {
-  font-size: 22px;
+  font-size: var(--font-size-xl);
   font-weight: 500;
   color: var(--color-text-primary);
   margin: 0 0 var(--spacing-xxs) 0;
 }
 
 .page-subtitle {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
   margin: 0;
 }

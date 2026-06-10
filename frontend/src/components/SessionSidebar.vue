@@ -2,8 +2,13 @@
   <div class="session-sidebar" :class="{ collapsed }">
     <div class="sidebar-header">
       <h3 v-if="!collapsed">对话历史</h3>
-      <el-button text @click="emit('toggle')">
-        {{ collapsed ? '☰' : '×' }}
+      <el-button
+        :class="['sidebar-toggle-btn', { collapsed }]"
+        text
+        @click="emit('toggle')"
+      >
+        <el-icon v-if="collapsed"><Expand /></el-icon>
+        <el-icon v-else><Fold /></el-icon>
       </el-button>
     </div>
     <div v-if="!collapsed" class="sidebar-content">
@@ -26,7 +31,7 @@
 </template>
 
 <script setup>
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Expand, Fold } from '@element-plus/icons-vue'
 
 defineProps({
   conversations: { type: Array, default: () => [] },
@@ -44,7 +49,7 @@ function formatDate(dateStr) {
 
 <style scoped>
 .session-sidebar {
-  width: 220px;
+  width: 350px;
   flex-shrink: 0;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -56,7 +61,43 @@ function formatDate(dateStr) {
 }
 
 .session-sidebar.collapsed {
-  width: 40px;
+  width: 48px;
+  border: none;
+  background: transparent;
+}
+
+.session-sidebar.collapsed .sidebar-header {
+  border: none;
+  padding: 0;
+  justify-content: center;
+  margin-top: var(--spacing-sm);
+}
+
+.sidebar-toggle-btn {
+  font-size: var(--font-size-lg);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  transition: all var(--duration-normal) var(--ease-out-quint);
+}
+
+.sidebar-toggle-btn:hover {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+}
+
+.sidebar-toggle-btn.collapsed {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-hover);
+}
+
+.sidebar-toggle-btn.collapsed:hover {
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
+  transform: translateY(-1px);
 }
 
 .sidebar-header {
@@ -69,7 +110,7 @@ function formatDate(dateStr) {
 }
 
 .sidebar-header h3 {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--color-text-primary);
   letter-spacing: 0.5px;
@@ -95,7 +136,7 @@ function formatDate(dateStr) {
   border-radius: 6px;
   color: var(--color-primary);
   background: transparent;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   cursor: pointer;
   transition: all var(--duration-normal) var(--ease-out-quint);
 }
@@ -115,7 +156,7 @@ function formatDate(dateStr) {
   padding: 10px 8px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -141,12 +182,12 @@ function formatDate(dateStr) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.4;
 }
 
 .conv-date {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 </style>

@@ -46,7 +46,7 @@ withDefaults(defineProps({
 }
 
 .loading-text {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   margin: 0;
 }

@@ -56,7 +56,7 @@ const formattedValue = computed(() => {
 }
 
 .metric-title {
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
 }
 
@@ -74,20 +74,20 @@ const formattedValue = computed(() => {
 }
 
 .metric-value {
-  font-size: 28px;
+  font-size: var(--font-size-xxl);
   font-weight: 500;
   color: var(--color-text-primary);
   line-height: 1.2;
 }
 
 .metric-unit {
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
 
 .metric-hint {
   margin-top: var(--spacing-xs);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 </style>
