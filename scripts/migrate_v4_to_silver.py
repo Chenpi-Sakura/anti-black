@@ -44,12 +44,12 @@ def fetch_v4_clues(db, min_confidence: float, batch: int) -> list:
             SELECT clue_id, risk_label_level1, risk_label_level2,
                    confidence, classification_reason
             FROM antiblack.clues
-            WHERE classification_reason LIKE 'V4 %'
+            WHERE classification_reason LIKE %s
               AND confidence >= %s
             ORDER BY created_at DESC
             LIMIT %s
             """,
-            (min_confidence, batch),
+            ('V4 %', min_confidence, batch),
         )
         return cur.fetchall()
 
