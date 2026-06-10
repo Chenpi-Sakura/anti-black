@@ -312,43 +312,71 @@ async def main(days: int = RECLASSIFY_DAYS, limit: int = DEFAULT_LIMIT, classifi
     if not llm_inputs:
         logger.info("Nothing left for LLM, skipping.")
     else:
-        logger.info("Phase 3c: LLM pass with V3 Few-Shot prompt + Semaphore + retries...")
+        logger.info(f"Phase 3c: LLM pass with V3 Few-Shot prompt + Semaphore + retries...")
+        logger.info(f"  Total LLM inputs: {len(llm_inputs)}")
         # V3: global LLM client singleton. Reads from env (LLM_PRIMARY_*)
         # already loaded by config's _load_env_file(). Don't pass config object.
         from models.clients.llm import LLMClient
         llm_client = LLMClient()
 
         semaphore = asyncio.Semaphore(LLM_SEMAPHORE)
-        tasks = [
-            classify_one_with_retry(text, llm_client, semaphore)
-            for _, text in llm_inputs
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # V6: stream in batches to avoid memory blow-up.
+        # Previous design: asyncio.gather(*20k tasks) — peak 20k Task objects
+        # (~30-40MB) + LLM queue + connection pool = OOM / GC stall.
+        # Fix: process in BATCH_SIZE=400 chunks, commit each chunk, then next.
+        # Memory stays bounded; progress visible per chunk.
+        BATCH_SIZE = 400
+        total_llm_updates = 0
+        total_llm_failures = 0
+        for batch_start in range(0, len(llm_inputs), BATCH_SIZE):
+            batch = llm_inputs[batch_start:batch_start + BATCH_SIZE]
+            batch_num = batch_start // BATCH_SIZE + 1
+            total_batches = (len(llm_inputs) + BATCH_SIZE - 1) // BATCH_SIZE
+            logger.info(
+                f"  LLM batch {batch_num}/{total_batches} "
+                f"({len(batch)} items, {batch_start+len(batch)}/{len(llm_inputs)} total)"
+            )
+            tasks = [
+                classify_one_with_retry(text, llm_client, semaphore)
+                for _, text in batch
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        llm_updates = []
-        llm_failures = 0
-        for (idx, _), result in zip(llm_inputs, results):
-            if isinstance(result, Exception):
-                logger.error(f"LLM task exception: {result}")
-                llm_failures += 1
-                continue
-            if result is None:
-                llm_failures += 1
-                continue
-            llm_updates.append({
-                'clue_id': clue_ids[idx],
-                'risk_label_level1': result['level1'],
-                'risk_label_level2': result['level2'],
-                'classification_source': result['source'],
-                'classification_reason': classification_reason,
-            })
+            llm_updates = []
+            for (idx, _), result in zip(batch, results):
+                if isinstance(result, Exception):
+                    logger.error(f"LLM task exception: {result}")
+                    total_llm_failures += 1
+                    continue
+                if result is None:
+                    total_llm_failures += 1
+                    continue
+                llm_updates.append({
+                    'clue_id': clue_ids[idx],
+                    'risk_label_level1': result['level1'],
+                    'risk_label_level2': result['level2'],
+                    'classification_source': result['source'],
+                    'classification_reason': classification_reason,
+                })
+
+            if llm_updates:
+                # V6: commit each batch immediately so progress is durable
+                # and we don't lose everything to a mid-run crash.
+                await asyncio.to_thread(db.bulk_update_clue_labels, llm_updates, CHUNK_SIZE)
+                total_llm_updates += len(llm_updates)
+                logger.info(
+                    f"    -> batch {batch_num}: {len(llm_updates)} updated, "
+                    f"{len(batch) - len(llm_updates)} failed/low-conf"
+                )
+            else:
+                logger.info(
+                    f"    -> batch {batch_num}: 0 updated (all failed/low-conf)"
+                )
+
         logger.info(
-            f"LLM pass: {len(llm_updates)} updated, {llm_failures} failed/low-conf"
+            f"LLM pass done: {total_llm_updates} updated, "
+            f"{total_llm_failures} failed/low-conf (in {total_batches} batches)"
         )
-
-        if llm_updates:
-            logger.info(f"Persisting {len(llm_updates)} LLM updates in chunks...")
-            await asyncio.to_thread(db.bulk_update_clue_labels, llm_updates, CHUNK_SIZE)
 
     # V3: verify completeness
     logger.info("Phase 3d: verifying completeness...")
