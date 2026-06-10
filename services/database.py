@@ -621,6 +621,12 @@ class PostgreSQLService:
             (f"CREATE INDEX IF NOT EXISTS idx_clues_published_at ON {schema}.clues(published_at)",),
             (f"CREATE INDEX IF NOT EXISTS idx_clues_risk_published ON {schema}.clues(risk_label_level1, published_at DESC)",),
             (f"CREATE INDEX IF NOT EXISTS idx_clues_slang_mappings ON {schema}.clues USING GIN (slang_mappings)",),
+            # JSONB GIN on entity_list so `entity_list @> ANY(jsonb[])` (used by
+            # orchestrator._search_clues when LLM passes entity_types=['WECHAT'])
+            # can use a Bitmap Index Scan instead of a sequential scan + full
+            # JSONB parse. Without this, the "strong-signal lock" degrades to
+            # a full-table scan on every call.
+            (f"CREATE INDEX IF NOT EXISTS idx_clues_entity_list ON {schema}.clues USING GIN (entity_list)",),
 
             # Feedback indexes
             (f"CREATE INDEX IF NOT EXISTS idx_feedback_clue_id ON {schema}.feedback(clue_id)",),

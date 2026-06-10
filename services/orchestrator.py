@@ -27,6 +27,7 @@ SYNONYM_DICT: dict[str, list[str]] = {
     "微信":    ["微信", "微信号", "卫星", "加微", "vx", "V信"],
     "手机":    ["手机", "电话", "联系方式", "手机号"],
     "诈骗":    ["诈骗", "杀猪盘", "刷单", "兼职", "引流"],
+    "诈骗引流": ["诈骗引流", "诈骗", "杀猪盘", "刷单", "兼职", "引流"],
     "刷量":    ["刷量", "刷粉", "刷赞", "刷评", "涨粉", "刷播放"],
     "账号交易": ["账号交易", "卖号", "出号", "租号", "账号买卖", "换绑"],
     "黑产工具": ["黑产工具", "接码", "群控", "脚本"],
@@ -77,6 +78,14 @@ TOOLS = [
                     "query": {
                         "type": "string",
                         "description": "**MUST be Chinese keyword(s)** to match against clue text, e.g. '微信号', '诈骗', '刷粉', '账号交易'. raw_text / cleaned_text are stored in Chinese only — English keywords like 'WeChat' / 'fraud' will return 0 results. If user mentions an English term, translate to the Chinese equivalent (WeChat→微信号/卫星, fraud→诈骗/杀猪盘, account trading→账号交易)."
+                    },
+                    "entity_types": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": ["WECHAT", "PHONE", "QQ", "ACCOUNT"]
+                        },
+                        "description": "Optional strong-signal filter on extracted entities. Filters by entity_list JSONB column using GIN-indexed @> containment. Use when the user query explicitly references a contact channel (微信号/手机号/QQ) — combine with a Chinese query for the strongest lock (e.g. user='涉及微信号的诈骗' → query='诈骗', entity_types=['WECHAT'])."
                     },
                     "time_range": {
                         "type": "object",
@@ -317,6 +326,7 @@ SYSTEM_PROMPT = """You are a black-market intelligence analysis agent. Follow th
 - Do NOT repeat the same (tool, args) — the system will skip duplicates.
 - Each user-requested dimension MUST get its own tool call: slang → search_slang, relationship → kg_query, trend → aggregate_clue_stats. Do NOT substitute inline fields from search_clues results for dedicated tool calls.
 - **search_clues.query MUST be in Chinese.** `raw_text` and `cleaned_text` columns store Chinese only; English keywords (e.g. 'WeChat', 'fraud') match nothing and return 0. Translate user terms to Chinese before passing: WeChat→微信号/卫星, fraud→诈骗/杀猪盘, account trading→账号交易, traffic cheating→刷量/刷粉, black tools→黑产工具/接码, money laundering→洗钱. If multiple Chinese synonyms are relevant, prefer the one most common in clue text.
+- **search_clues.entity_types is a STRONG-signal lock.** When the user query explicitly references a contact channel (微信号/手机号/QQ/账号), you MUST also pass entity_types=['WECHAT' / 'PHONE' / 'QQ' / 'ACCOUNT'] alongside the Chinese query keyword. This filters by entity_list JSONB and uses the GIN index — much more precise than keyword search alone. Example: user='涉及微信号的诈骗' → call search_clues(query='诈骗', entity_types=['WECHAT'], risk_types=['fraud_leads']). For multi-channel queries, use multi-value (e.g. ['WECHAT', 'PHONE']).
 
 ## Report Structure (mix and match as needed)
 Risk distribution | Platform breakdown | High-value entities | Key relationships | Trends | Slang glossary | Actor portrait.
@@ -694,6 +704,7 @@ class Orchestrator:
                 time_range=tool_args.get("time_range"),
                 risk_types=tool_args.get("risk_types"),
                 platforms=tool_args.get("platforms"),
+                entity_types=tool_args.get("entity_types"),
                 limit=tool_args.get("limit", 50)
             )
         elif tool_name == "kg_query":
@@ -746,6 +757,7 @@ class Orchestrator:
         time_range: dict = None,
         risk_types: list = None,
         platforms: list = None,
+        entity_types: list = None,
         limit: int = 50
     ) -> list[dict]:
         """搜索线索的工具实现"""
@@ -823,6 +835,29 @@ class Orchestrator:
                 where_clauses.append("source_channel = ANY(%(platforms)s)")
                 params["platforms"] = mapped
 
+        # entity_types: 强信号实体类型过滤（JSONB @> 走 GIN 索引）
+        # 把 LLM 传的 ['WECHAT', 'PHONE'] 转成 [ '[{"entity_type":"WECHAT"}]',
+        # '[{"entity_type":"PHONE"}]' ] 的 JSON 字符串数组，匹配 entity_list 列
+        # 中至少包含其中一个 JSON object 的记录。
+        # Guard against (a) non-string entries (LLM schema drift), (b) values
+        # containing JSON-breaking chars ('"' '\' newline), and (c) values
+        # that aren't legal entity_type enum tokens. Without these guards a
+        # single bad token breaks the whole query (PG throws invalid json on
+        # parse, returns 500 to the agent).
+        if entity_types and isinstance(entity_types, list):
+            entity_type_filter = []
+            for et in entity_types:
+                if not isinstance(et, str) or not et:
+                    logger.warning(f"[search_clues] entity_types non-string/empty: {et!r}; skipping")
+                    continue
+                if not et.replace("_", "").isalnum() or not et.isupper():
+                    logger.warning(f"[search_clues] entity_types not a valid enum token: {et!r}; skipping")
+                    continue
+                entity_type_filter.append(json.dumps([{"entity_type": et}]))
+            if entity_type_filter:
+                where_clauses.append("entity_list @> ANY(%(entity_types_filter)s::jsonb[])")
+                params["entity_types_filter"] = entity_type_filter
+
         # 默认排除 e2e 测试数据
         where_clauses.append("source_channel IS NOT NULL AND source_channel != '' AND source_channel != 'e2e'")
 
@@ -833,11 +868,12 @@ class Orchestrator:
         # at default level — DEBUG would be filtered out by uvicorn defaults).
         logger.info(
             f"[search_clues] LLM sent: query={query!r} time_range={time_range!r} "
-            f"risk_types={risk_types!r} platforms={platforms!r}"
+            f"risk_types={risk_types!r} platforms={platforms!r} entity_types={entity_types!r}"
         )
         # log params excluding the bulky pattern lists (just show count for transparency)
-        log_params = {k: v for k, v in params.items() if k not in ("query_pat", "query_pats")}
+        log_params = {k: v for k, v in params.items() if k not in ("query_pat", "query_pats", "entity_types_filter")}
         log_params["query_pats"] = f"<{len(params.get('query_pats', []))} patterns>"
+        log_params["entity_types_filter"] = f"<{len(params.get('entity_types_filter', []))} filters>"
         logger.info(f"[search_clues] SQL: WHERE {where_sql} | params={log_params}")
 
         with self.db._get_cursor() as cur:
