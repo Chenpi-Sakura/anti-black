@@ -693,13 +693,45 @@ class SlangLearner:
             #    要求，绝不跳过。
             llm_says_slang = result.get('is_valid_slang', False)
 
-            # 保存 regex_pattern
-            candidate.regex_pattern = result.get('regex_pattern')
-            candidate.meaning = result.get('meaning')
             refined_word = result.get('refined_word')
             if refined_word and refined_word != candidate.word and len(refined_word) >= 2:
-                logger.info(f"LLM refined candidate word from '{candidate.word}' to '{refined_word}'")
-                candidate.word = refined_word
+                logger.info(
+                    f"LLM refined candidate word from '{candidate.word}' "
+                    f"to '{refined_word}'"
+                )
+                # BUG-FIX (2026-06-10): merge into new key instead of
+                # mutating candidate.word in-place, which desynchronised
+                # the dict key from the object attribute.
+                #
+                # 1. If the refined key already exists, merge counts +
+                #    contexts so the old progress isn't lost. Also carry
+                #    over the higher inference_count (max of both) so the
+                #    retry budget isn't reset on refinement.
+                # 2. Remove the old key from self._candidates.
+                # 3. Continue using the candidate object under the new key.
+                old_word = candidate.word
+                if refined_word in self._candidates:
+                    existing = self._candidates[refined_word]
+                    existing.occurrence_count += candidate.occurrence_count
+                    existing.contexts.extend(candidate.contexts)
+                    existing.inference_count = max(
+                        existing.inference_count, candidate.inference_count
+                    )
+                    candidate = existing
+                    logger.info(
+                        f"Merged '{old_word}' into existing '{refined_word}' "
+                        f"(new count={existing.occurrence_count})"
+                    )
+                else:
+                    candidate.word = refined_word
+                    self._candidates[refined_word] = candidate
+                # Always remove the old key to prevent orphan entries.
+                self._candidates.pop(old_word, None)
+
+            # Save regex/meaning AFTER the merge so the LLM's just-returned
+            # values land on the (possibly swapped) candidate reference.
+            candidate.regex_pattern = result.get('regex_pattern')
+            candidate.meaning = result.get('meaning')
 
             if not candidate.regex_pattern:
                 logger.warning(f"LLM returned no regex_pattern for {candidate.word}")

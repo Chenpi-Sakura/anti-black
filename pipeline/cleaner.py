@@ -4,7 +4,8 @@ Handles message cleaning and normalization.
 """
 import logging
 import re
-from typing import Any, Dict, List, Optional, Set
+from collections import OrderedDict
+from typing import Any, Dict, List, Optional
 import hashlib
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,13 @@ class Cleaner:
         self.dedup_window_hours = self.config.get('cleaning', {}).get('dedup_window_hours', 24)
         self.simhash_threshold = self.config.get('cleaning', {}).get('simhash_threshold', 12)
 
-        # In-memory deduplication cache
-        self._exact_hash_cache: Set[str] = set()
+        # In-memory deduplication cache.
+        # BUG-FIX H1 (2026-06-10): OrderedDict preserves insertion order so
+        # _trim_cache evicts the actual oldest entries (true LRU-ish), not
+        # a random half as a plain set would. move_to_end() on the dedup
+        # check marks the entry as recently-used, so the freshly-added
+        # entry from the previous batch survives the next trim.
+        self._exact_hash_cache: "OrderedDict[str, None]" = OrderedDict()
         self._simhash_cache: Dict[str, int] = {}
 
         # Noise patterns
@@ -95,6 +101,8 @@ class Cleaner:
         # Exact deduplication
         text_hash = self._compute_text_hash(cleaned_text)
         if text_hash in self._exact_hash_cache:
+            # Mark as recently-used so the next trim keeps it.
+            self._exact_hash_cache.move_to_end(text_hash)
             logger.debug(f"Duplicate exact hash: {message_id}")
             return None
 
@@ -104,12 +112,13 @@ class Cleaner:
             logger.debug(f"Duplicate simhash: {message_id}")
             return None
 
-        # Add to caches
-        self._exact_hash_cache.add(text_hash)
+        # Add to caches. OrderedDict[key] = None: insertion order is the
+        # "age" signal used by _trim_cache.
+        self._exact_hash_cache[text_hash] = None
         self._simhash_cache[text_hash] = simhash
 
-        # Limit cache size
-        if len(self._exact_hash_cache) > 100000:
+        # Limit cache size (10k to bound SimHash O(n) scan cost)
+        if len(self._exact_hash_cache) > 10000:
             self._trim_cache()
 
         return CleanedMessage(
@@ -183,11 +192,16 @@ class Cleaner:
         return bin(xor).count('1')
 
     def _trim_cache(self) -> None:
-        """Trim caches to limit memory usage."""
-        # Remove oldest half
-        if len(self._exact_hash_cache) > 100000:
-            remove_count = len(self._exact_hash_cache) // 2
-            keys_to_remove = list(self._exact_hash_cache)[:remove_count]
-            for key in keys_to_remove:
-                self._exact_hash_cache.discard(key)
-                self._simhash_cache.pop(key, None)
+        """Trim caches to limit memory usage (drop oldest half).
+
+        OrderedDict iteration starts from the OLDEST entry. popitem(last=False)
+        removes the head, so the trim evicts the actual least-recently-added
+        entries (true LRU direction), not a random half.
+        """
+        remove_count = len(self._exact_hash_cache) // 2
+        for _ in range(remove_count):
+            try:
+                key, _ = self._exact_hash_cache.popitem(last=False)
+            except KeyError:
+                break
+            self._simhash_cache.pop(key, None)

@@ -298,28 +298,36 @@ class DaemonScheduler:
             asyncio.to_thread(extractor.extract, msg.message_id, msg.cleaned_text)
             for msg in cleaned_messages
         ], return_exceptions=True)
-        # Drop exceptions, keep results aligned to cleaned_messages.
-        # We use a sentinel ("__EXC__") and re-raise only if EVERYTHING
-        # failed (otherwise the partial batch still gets persisted).
+        # BUG-FIX (2026-06-10): replace filtered-out exceptions with None
+        # sentinels instead of shrinking the list. Keeps 1:1 alignment with
+        # cleaned_messages — downstream code can skip None entries.
+        # Re-raise only if EVERYTHING failed (otherwise partial batch persists).
         if extraction_results and all(isinstance(r, Exception) for r in extraction_results):
             raise extraction_results[0]
-        extraction_results = [r for r in extraction_results if not isinstance(r, Exception)]
+        extraction_results = [
+            r if not isinstance(r, Exception) else None
+            for r in extraction_results
+        ]
 
-        # Route
-        route_results = []
+        # Route — use None sentinel so route_results stays aligned
+        route_results: List[Optional[str]] = []
         for i, msg in enumerate(cleaned_messages):
+            r_ext = extraction_results[i]
+            if r_ext is None:
+                route_results.append(None)
+                continue
             msg_context = {
                 "message_id": msg.message_id,
                 "source_channel": msg.source_channel,
                 "risk_level": classification_results[i].level1_label,
-                "entities": [{"type": e.entity_type} for e in extraction_results[i].entities],
+                "entities": [{"type": e.entity_type} for e in r_ext.entities],
                 # extractor returns List[Dict[str, str]] with keys 'slang_raw'
                 # and 'meaning' (see pipeline/extractor.py:111-114), NOT a
                 # SlangMapping dataclass instance. Pre-existing bug surfaced
                 # 2026-06-05 once slang_mappings stopped being empty.
                 "slang_mappings": [
                     {"slang": s["slang_raw"], "meaning": s["meaning"]}
-                    for s in extraction_results[i].slang_mappings
+                    for s in r_ext.slang_mappings
                 ],
                 "raw_text": msg.original_text,
                 "cleaned_text": msg.cleaned_text,
@@ -330,6 +338,13 @@ class DaemonScheduler:
         # Insert clues
         clues_inserted = 0
         for i, msg in enumerate(cleaned_messages):
+            r_ext = extraction_results[i]
+            if r_ext is None:
+                logger.warning(
+                    f"Skipping clue insertion for {msg.message_id}: "
+                    f"entity extraction failed"
+                )
+                continue
             try:
                 published_at = msg.published_at
                 if isinstance(published_at, str):
@@ -352,10 +367,10 @@ class DaemonScheduler:
                     source_channel=msg.source_channel,
                     source_group_id=msg.group_id,
                     source_author_id=msg.author_id,
-                    entity_list=[{"entity_type": e.entity_type, "entity_value": e.entity_value, "source": "extractor"} for e in extraction_results[i].entities],
+                    entity_list=[{"entity_type": e.entity_type, "entity_value": e.entity_value, "source": "extractor"} for e in r_ext.entities],
                     slang_mappings=[
                         {"slang": s["slang_raw"], "meaning": s["meaning"]}
-                        for s in extraction_results[i].slang_mappings
+                        for s in r_ext.slang_mappings
                     ],
                     query_id=None,
                     platform=msg.metadata.get("platform") if msg.metadata else None,
@@ -381,6 +396,11 @@ class DaemonScheduler:
                     self._slang_learner.process_text,
                     msg.cleaned_text,
                     source_channel=msg.source_channel,
+                    # BUG-FIX (2026-06-10): pass message_id for FR-SLANG-03
+                    # independent sample tracking. Without it, identical
+                    # texts from different messages collapse into one
+                    # synthetic hash-based ID, corrupting _distinct_msg_count.
+                    message_id=msg.message_id,
                 )
             except Exception as e:
                 logger.warning(
@@ -429,26 +449,35 @@ class DaemonScheduler:
         # Clue insertion is now COMPLETE; deep channel happens asynchronously.
         # QueueFull → log + drop (entity extraction is best-effort, not critical path).
         n_deep = 0
+        n_dropped = 0
         for msg, channel in zip(cleaned_messages, route_results):
-            if channel == 'deep':
-                try:
-                    self._deep_queue.put_nowait({
-                        "message_id": msg.message_id,
-                        "cleaned_text": msg.cleaned_text,
-                        "source_channel": msg.source_channel,
-                        "author": msg.author_id,
-                        "metadata": msg.metadata,
-                    })
-                    n_deep += 1
-                except asyncio.QueueFull:
-                    logger.warning(
-                        f"Deep queue full (size={self._deep_queue.qsize()}/1000); "
-                        f"dropping {msg.message_id} from LightRAG processing "
-                        f"(clue already inserted, entity extraction is best-effort)"
-                    )
+            if channel != 'deep':
+                if channel is None:
+                    n_dropped += 1
+                continue
+            try:
+                self._deep_queue.put_nowait({
+                    "message_id": msg.message_id,
+                    "cleaned_text": msg.cleaned_text,
+                    "source_channel": msg.source_channel,
+                    "author": msg.author_id,
+                    "metadata": msg.metadata,
+                })
+                n_deep += 1
+            except asyncio.QueueFull:
+                logger.warning(
+                    f"Deep queue full (size={self._deep_queue.qsize()}/1000); "
+                    f"dropping {msg.message_id} from LightRAG processing "
+                    f"(clue already inserted, entity extraction is best-effort)"
+                )
         if n_deep:
             logger.info(
                 f"Enqueued {n_deep} deep messages; queue size={self._deep_queue.qsize()}"
+            )
+        if n_dropped:
+            logger.info(
+                f"Dropped {n_dropped} messages from deep channel "
+                f"(entity extraction failed)"
             )
 
     async def _lightrag_worker_loop(self):
@@ -839,7 +868,12 @@ class DaemonScheduler:
                 break
             try:
                 from scripts.migrate_v4_to_silver import main as migrate_main
-                migrate_main()
+                # BUG-FIX (2026-06-10): wrap sync DB I/O in to_thread.
+                # migrate_main reads clues + writes training_samples,
+                # which can take seconds on large batches. Calling it
+                # directly would block the asyncio loop and starve
+                # Kafka consumer / LLM pacing coroutines.
+                await asyncio.to_thread(migrate_main)
             except Exception as e:
                 logger.error(f"Silver migration loop error: {e}", exc_info=True)
 

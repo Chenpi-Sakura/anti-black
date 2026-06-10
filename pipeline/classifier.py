@@ -1047,3 +1047,53 @@ def build_taxonomy_mapping(taxonomy_config: Dict[str, Any]) -> Dict[str, Dict[st
             }
 
     return mapping
+
+
+# Module-level Classifier singleton cache.
+# Without this, each call to Classifier(config={}) in SlangToRuleBridge
+# re-unpickles the embedding model from disk, causing redundant I/O.
+import threading as _threading
+_CLASSIFIER_INSTANCE: Optional[Classifier] = None
+_CLASSIFIER_CONFIG: Optional[Dict[str, Any]] = None
+_CLASSIFIER_LOCK = _threading.Lock()
+
+
+def get_shared_classifier(config: Dict[str, Any] = None) -> Classifier:
+    """Return a shared Classifier instance (cached at module level).
+
+    CONFIG IS ONLY USED ON THE FIRST CALL. Subsequent calls with a
+    different `config` argument are silently ignored — the cached
+    instance from the first call is returned. Callers that genuinely
+    need a different config (different rule threshold, embedding
+    thresholds, etc.) must construct a fresh `Classifier(config)`
+    directly without going through this helper.
+
+    This design exists because:
+      1. The embedding model pkl (50KB joblib) is the expensive part.
+         Sharing it across all callers saves disk + unpickle I/O.
+      2. Stage-1 rules and CANONICAL_LEVEL2 are class attributes
+         (not instance), so config differences only matter for
+         rule_threshold / embedding_threshold / llm_threshold — which
+         are set at construction time and rarely differ between callers.
+
+    If you pass a different config after the singleton was built, a
+    warning is logged once so the silent override is at least visible.
+
+    Double-checked locking: the inner check guards against two threads
+    both passing the outer None check and each constructing a separate
+    Classifier (which would unpickle the model twice).
+    """
+    global _CLASSIFIER_INSTANCE, _CLASSIFIER_CONFIG
+    if _CLASSIFIER_INSTANCE is None:
+        with _CLASSIFIER_LOCK:
+            if _CLASSIFIER_INSTANCE is None:
+                _CLASSIFIER_INSTANCE = Classifier(config or {})
+                _CLASSIFIER_CONFIG = config or {}
+    elif config and config != _CLASSIFIER_CONFIG:
+        logger.warning(
+            f"get_shared_classifier called with config={config!r} but "
+            f"singleton was already built with config={_CLASSIFIER_CONFIG!r}; "
+            f"ignoring new config. Construct a fresh Classifier() if you "
+            f"need different rule/embedding/llm thresholds."
+        )
+    return _CLASSIFIER_INSTANCE

@@ -78,6 +78,11 @@ class PostgreSQLService:
             conn.autocommit = True
             return conn
         self._pool.putconn(_configure(self._conn))
+        # BUG-FIX (2026-06-10): clear self._conn after putconn so no code
+        # can accidentally use the returned connection. All callers should
+        # go through _get_cursor() / _PooledCursor, which borrow from the
+        # pool on each access.
+        self._conn = None
         logger.info(
             f"Connected to PostgreSQL {self.host}:{self.port}/{self.database} "
             f"(ThreadedConnectionPool min=2 max=20)"
@@ -1206,36 +1211,60 @@ class PostgreSQLService:
         if not updates:
             return 0
         total_updated = 0
-        with self._get_cursor() as cur:
-            for i in range(0, len(updates), chunk_size):
-                chunk = updates[i:i + chunk_size]
-                try:
-                    for u in chunk:
-                        cur.execute(
-                            sql.SQL("""
-                                UPDATE {}.clues
-                                SET risk_label_level1 = %s,
-                                    risk_label_level2 = %s,
-                                    classification_source = %s,
-                                    classification_reason = %s
-                                WHERE clue_id = %s
-                            """).format(sql.Identifier(self.schema)),
-                            (
-                                u.get('risk_label_level1'),
-                                u.get('risk_label_level2'),
-                                u.get('classification_source'),
-                                u.get('classification_reason'),
-                                u['clue_id'],
-                            ),
+        # BUG-FIX (2026-06-10): borrow a dedicated connection with
+        # autocommit=False so commit/rollback works correctly.
+        # _PooledCursor (used by _get_cursor) always sets autocommit=True,
+        # calling commit() on which raises psycopg2.ProgrammingError.
+        conn = self._pool.getconn()
+        conn.autocommit = False
+        saw_exception = False
+        try:
+            with conn.cursor() as cur:
+                for i in range(0, len(updates), chunk_size):
+                    chunk = updates[i:i + chunk_size]
+                    try:
+                        for u in chunk:
+                            cur.execute(
+                                sql.SQL("""
+                                    UPDATE {}.clues
+                                    SET risk_label_level1 = %s,
+                                        risk_label_level2 = %s,
+                                        classification_source = %s,
+                                        classification_reason = %s
+                                    WHERE clue_id = %s
+                                """).format(sql.Identifier(self.schema)),
+                                (
+                                    u.get('risk_label_level1'),
+                                    u.get('risk_label_level2'),
+                                    u.get('classification_source'),
+                                    u.get('classification_reason'),
+                                    u['clue_id'],
+                                ),
+                            )
+                        conn.commit()
+                        total_updated += len(chunk)
+                    except Exception as e:
+                        # CR #9: connection is in aborted-tx state after
+                        # an execute error with autocommit=False. Rollback
+                        # before returning to the pool, and close=True to
+                        # drop a possibly poisoned connection.
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                        self._pool.putconn(conn, close=True)
+                        saw_exception = True
+                        logger.error(
+                            f"bulk_update_clue_labels chunk {i//chunk_size} "
+                            f"({len(chunk)} rows) failed: {e}"
                         )
-                    cur.connection.commit()
-                    total_updated += len(chunk)
-                except Exception as e:
-                    cur.connection.rollback()
-                    logger.error(
-                        f"bulk_update_clue_labels chunk {i//chunk_size} "
-                        f"({len(chunk)} rows) failed: {e}"
-                    )
+                        break
+            if not saw_exception:
+                self._pool.putconn(conn)
+        except Exception:
+            if not saw_exception:
+                self._pool.putconn(conn, close=True)
+            raise
         return total_updated
 
     def count_clues_with_label(
@@ -1350,8 +1379,6 @@ class PostgreSQLService:
 
         # Determine sort direction
         sort_dir = "DESC" if sort_order == -1 else "ASC"
-        # Quote reserved words
-        sort_col = f'"{sort_by}"' if sort_by.lower() in ('desc', 'content') else sort_by
 
         # Get total count
         with self._get_cursor() as cur:
@@ -2064,10 +2091,13 @@ class PostgreSQLService:
         }
 
     def close(self) -> None:
-        """Close database connection."""
+        """Close database connection and pool."""
         if self._conn:
             self._conn.close()
             self._conn = None
+        if self._pool:
+            self._pool.closeall()
+            self._pool = None
 
     # ========== Conversation Operations ==========
 

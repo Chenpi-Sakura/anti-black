@@ -43,6 +43,12 @@ def fetch_v4_clues(db, min_confidence: float, batch: int) -> list:
     V6 fix: use a NOT EXISTS subquery to avoid fetching already-migrated
     rows — means re-running the script is idempotent even within a single
     batch window.
+
+    BUG-FIX (2026-06-10): NOT EXISTS now uses sample_id = 'ts_' || c.clue_id
+    (clue-level dedup) instead of label-level dedup. The old version checked
+    `t.label = c.risk_label_level1`, which meant after the first clue with a
+    given level1 label was migrated, ALL other clues sharing the same label
+    were incorrectly skipped — even though they hadn't been migrated yet.
     """
     with db._get_cursor() as cur:
         cur.execute(
@@ -54,8 +60,7 @@ def fetch_v4_clues(db, min_confidence: float, batch: int) -> list:
               AND c.confidence >= %s
               AND NOT EXISTS (
                   SELECT 1 FROM antiblack.training_samples t
-                  WHERE t.collection_context = 'v4_migration'
-                    AND t.label = c.risk_label_level1
+                  WHERE t.sample_id = 'ts_' || c.clue_id
               )
             ORDER BY c.created_at DESC
             LIMIT %s

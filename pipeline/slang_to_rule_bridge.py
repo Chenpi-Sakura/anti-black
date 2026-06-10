@@ -126,28 +126,17 @@ class SlangToRuleBridge:
             logger.error(f"[bridge] LLM call failed: {e}")
             return None
 
-    def _ask_embedding(self, text: str) -> Optional[Tuple[str, float]]:
-        """Return (predicted_level1, confidence) or None."""
-        try:
-            from pipeline.classifier import Classifier
-            c = Classifier(config={})
-            if not c._embedding_clf or not c._embedding_le:
-                return None
-            return c._classify_by_embedding(text, {})  # sync, fine for short text
-        except Exception as e:
-            logger.error(f"[bridge] embedding call failed: {e}")
-            return None
-        # The embedding classify returns a ClassificationResult; pull level1 + confidence
-        # Caller will get the result
-
     async def _classify_meaning_with_embedding(self, meaning: str) -> Optional[Tuple[str, float]]:
         """Classify the slang's meaning using the embedding model.
 
         Returns (predicted_level1, confidence) or None.
+
+        Uses get_shared_classifier() to avoid re-loading the embedding
+        model from disk on every evaluation.
         """
         try:
-            from pipeline.classifier import Classifier
-            c = Classifier(config={})
+            from pipeline.classifier import get_shared_classifier
+            c = get_shared_classifier()
             if not c._embedding_clf or not c._embedding_le:
                 return None
             r = c._classify_by_embedding(meaning, {})
