@@ -8,6 +8,26 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Configure root logger so application loggers (orchestrator, services.*) emit
+# INFO-level messages by default. Without this, those loggers inherit WARNING
+# (Python's default) and `logger.info(...)` calls are silently dropped, making
+# it impossible to debug production queries from the uvicorn console.
+# Uvicorn's own `--log-level` flag only affects uvicorn.access / uvicorn.error,
+# not our application code. Use LOG_LEVEL env to override.
+#
+# force=True is required: CPython's basicConfig is a no-op if the root logger
+# already has handlers (uvicorn attaches its own handlers during startup, and
+# several service modules call basicConfig at import time — without force=True
+# our format/level would be silently ignored depending on import order).
+import os
+_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.INFO),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+    force=True,
+)
+
 logger = logging.getLogger(__name__)
 
 

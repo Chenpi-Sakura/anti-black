@@ -33,7 +33,7 @@ TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Keyword(s) to match against clue text, e.g. account_trading, Douyin_username, WeChat"
+                        "description": "**MUST be Chinese keyword(s)** to match against clue text, e.g. '微信号', '诈骗', '刷粉', '账号交易'. raw_text / cleaned_text are stored in Chinese only — English keywords like 'WeChat' / 'fraud' will return 0 results. If user mentions an English term, translate to the Chinese equivalent (WeChat→微信号/卫星, fraud→诈骗/杀猪盘, account trading→账号交易)."
                     },
                     "time_range": {
                         "type": "object",
@@ -273,6 +273,7 @@ SYSTEM_PROMPT = """You are a black-market intelligence analysis agent. Follow th
 - Max 3 tool calls per query (system-enforced).
 - Do NOT repeat the same (tool, args) — the system will skip duplicates.
 - Each user-requested dimension MUST get its own tool call: slang → search_slang, relationship → kg_query, trend → aggregate_clue_stats. Do NOT substitute inline fields from search_clues results for dedicated tool calls.
+- **search_clues.query MUST be in Chinese.** `raw_text` and `cleaned_text` columns store Chinese only; English keywords (e.g. 'WeChat', 'fraud') match nothing and return 0. Translate user terms to Chinese before passing: WeChat→微信号/卫星, fraud→诈骗/杀猪盘, account trading→账号交易, traffic cheating→刷量/刷粉, black tools→黑产工具/接码, money laundering→洗钱. If multiple Chinese synonyms are relevant, prefer the one most common in clue text.
 
 ## Report Structure (mix and match as needed)
 Risk distribution | Platform breakdown | High-value entities | Key relationships | Trends | Slang glossary | Actor portrait.
@@ -710,12 +711,24 @@ class Orchestrator:
         where_clauses = []
         params: dict = {}
 
-        # query: keyword search against clue text
+        # query: keyword search against clue text. Split on whitespace and
+        # match each token independently (OR-of-ILIKE) so multi-keyword
+        # queries like '微信号 诈骗' don't require a single record to
+        # contain ALL tokens in literal order. A record matches if it
+        # contains ANY of the tokens.
+        #
+        # Cap token count at MAX_QUERY_TOKENS to bound the SQL array size —
+        # a query with 1000 whitespace-separated words would issue
+        # `ILIKE ANY(<1000 patterns>)` against 110K+ rows, a DoS.
+        # _search_slang uses an analogous cap of [:8] for the same reason.
+        MAX_QUERY_TOKENS = 8
         if query and query.strip():
+            tokens = query.split()[:MAX_QUERY_TOKENS]
+            patterns = [f"%{t}%" for t in tokens]
             where_clauses.append(
-                "(raw_text ILIKE %(query_pat)s OR cleaned_text ILIKE %(query_pat)s)"
+                "(raw_text ILIKE ANY(%(query_pats)s) OR cleaned_text ILIKE ANY(%(query_pats)s))"
             )
-            params["query_pat"] = f"%{query.strip()}%"
+            params["query_pats"] = patterns
 
         # time_range: structured {amount, unit} dict from LLM
         if time_range:
@@ -772,12 +785,16 @@ class Orchestrator:
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
         params["limit"] = limit
 
-        # Debug: log what the LLM sent and the generated SQL
-        logger.debug(
+        # Log what the LLM sent and the generated SQL (INFO so it's visible
+        # at default level — DEBUG would be filtered out by uvicorn defaults).
+        logger.info(
             f"[search_clues] LLM sent: query={query!r} time_range={time_range!r} "
             f"risk_types={risk_types!r} platforms={platforms!r}"
         )
-        logger.debug(f"[search_clues] SQL: WHERE {where_sql} | params={ {k:v for k,v in params.items() if k != 'query_pat'} }")
+        # log params excluding the bulky pattern lists (just show count for transparency)
+        log_params = {k: v for k, v in params.items() if k not in ("query_pat", "query_pats")}
+        log_params["query_pats"] = f"<{len(params.get('query_pats', []))} patterns>"
+        logger.info(f"[search_clues] SQL: WHERE {where_sql} | params={log_params}")
 
         with self.db._get_cursor() as cur:
             cur.execute(f"""
@@ -791,6 +808,7 @@ class Orchestrator:
             """, params)
 
             rows = cur.fetchall()
+            logger.info(f"[search_clues] SQL returned {len(rows)} rows (LIMIT {limit})")
             result = [dict(row) for row in rows]
 
             # JSON 序列化前处理 datetime
