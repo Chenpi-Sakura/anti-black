@@ -240,21 +240,31 @@ function handleSSEEvent(event) {
   const stage = event.stage || event.type
 
   if (stage && stage !== 'heartbeat' && stage !== 'content' && !hasStreamingAssistantMessage.value) {
-    // Deduplicate: if the last step has the same tool_name, update it in place
-    // instead of appending.  The backend emits two events per tool invocation
-    // (retrieving → retrieved), both with tool_name set, which would otherwise
-    // render the tool tag twice.
-    const prev = currentReasoningSteps.value.length > 0
-      ? currentReasoningSteps.value[currentReasoningSteps.value.length - 1]
-      : null
-    if (prev && event.tool_name && prev.tool_name === event.tool_name) {
-      prev.stage = stage
-      prev.content = event.content || stage
+    // Deduplicate by tool_name across ALL steps (not just the last one).
+    // With parallel execution tools complete in arbitrary order so two
+    // events for the same tool may not be adjacent — only checking the
+    // last step would miss those and create duplicate entries.
+    if (event.tool_name) {
+      const existing = currentReasoningSteps.value.find(
+        s => s.tool_name === event.tool_name
+      )
+      if (existing) {
+        existing.stage = stage
+        existing.content = event.content || stage
+      } else {
+        currentReasoningSteps.value.push({
+          stage,
+          content: event.content || stage,
+          tool_name: event.tool_name,
+          time: new Date()
+        })
+      }
     } else {
+      // No tool_name → append as a generic reasoning step
       currentReasoningSteps.value.push({
         stage,
         content: event.content || stage,
-        tool_name: event.tool_name,
+        tool_name: null,
         time: new Date()
       })
     }
