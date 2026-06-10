@@ -38,39 +38,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger('reclassify_unknown')
 
-RECLASSIFY_DAYS = 7
+RECLASSIFY_DAYS = 2  # 48h 增量模式——每 1-2h 跑完最新数据，避免 73k 全量 6+ 小时风险
 RULE_CONFIDENCE_THRESHOLD = 0.7
 LLM_SEMAPHORE = 10
 LLM_RETRIES = [1, 2, 4, 8, 16]
 CHUNK_SIZE = 500
 LLM_CONFIDENCE_THRESHOLD = 0.5
-# 默认不限上限——7d 窗口下"未知/其他"通常 7w+ 条，全跑完看用户决定
+# 默认不限上限——但因 RECLASSIFY_DAYS=2，实际只会拉最近 48h 增量（~19k 条），1-2h 跑完
 DEFAULT_LIMIT = None
 
 
-def fetch_unknown_clue_ids(db, days=RECLASSIFY_DAYS, limit=DEFAULT_LIMIT) -> List[Dict[str, Any]]:
-    """Pull clue_id + cleaned_text for 未知/其他 in last N days."""
+def fetch_unknown_clue_ids(db, days=RECLASSIFY_DAYS, limit=DEFAULT_LIMIT, include_existing: bool = False) -> List[Dict[str, Any]]:
+    """Pull clue_id + cleaned_text for 未知/其他 in last N days.
+
+    V4 hardening: by default, skip clues already reclassified by V4
+    (their classification_reason starts with 'V4 '). Pass
+    --include-existing to reprocess them anyway.
+    """
+    existing_clause = "" if include_existing else "AND (classification_reason IS NULL OR classification_reason NOT LIKE 'V4 %')"
     with db._get_cursor() as cur:
         if limit is None:
             cur.execute(
-                """
+                f"""
                 SELECT clue_id, cleaned_text, source_channel
                 FROM antiblack.clues
                 WHERE risk_label_level1 = '未知/其他'
                   AND created_at > NOW() - INTERVAL '%s days'
                   AND cleaned_text IS NOT NULL
+                  {existing_clause}
                 ORDER BY created_at DESC
                 """,
                 (days,),
             )
         else:
             cur.execute(
-                """
+                f"""
                 SELECT clue_id, cleaned_text, source_channel
                 FROM antiblack.clues
                 WHERE risk_label_level1 = '未知/其他'
                   AND created_at > NOW() - INTERVAL '%s days'
                   AND cleaned_text IS NOT NULL
+                  {existing_clause}
                 ORDER BY created_at DESC
                 LIMIT %s
                 """,
@@ -272,13 +280,13 @@ async def classify_one_with_retry(
         return None
 
 
-async def main(days: int = RECLASSIFY_DAYS, limit: int = DEFAULT_LIMIT, classification_reason: str = "V4 LLM reclassify"):
+async def main(days: int = RECLASSIFY_DAYS, limit: int = DEFAULT_LIMIT, classification_reason: str = "V4 LLM reclassify", include_existing: bool = False):
     config = get_config()
     db = PostgreSQLService.get_instance()
     classifier = Classifier(config)
 
-    logger.info(f"Phase 3a: fetching 未知/其他 clues (last {days}d, limit={limit})...")
-    rows = fetch_unknown_clue_ids(db, days, limit=limit)
+    logger.info(f"Phase 3a: fetching 未知/其他 clues (last {days}d, limit={limit}, include_existing={include_existing})...")
+    rows = fetch_unknown_clue_ids(db, days, limit=limit, include_existing=include_existing)
     logger.info(f"Fetched {len(rows)} clues")
     if not rows:
         return
@@ -398,14 +406,16 @@ def parse_args():
     import argparse
     p = argparse.ArgumentParser(description='Reclassify 未知/其他 clues with V4 rules + LLM')
     p.add_argument('--days', type=int, default=RECLASSIFY_DAYS,
-                   help=f'Look-back window in days (default: {RECLASSIFY_DAYS})')
+                   help=f'Look-back window in days (default: {RECLASSIFY_DAYS} = 48h incremental mode)')
     p.add_argument('--limit', type=int, default=DEFAULT_LIMIT,
-                   help=f'Max clues to process (default: {DEFAULT_LIMIT})')
+                   help=f'Max clues to process (default: {DEFAULT_LIMIT} = no cap; 48h window naturally caps ~19k)')
     p.add_argument('--reason', type=str, default='V4 LLM reclassify',
                    help='classification_reason marker for this run (default: V4 LLM reclassify)')
+    p.add_argument('--include-existing', action='store_true',
+                   help='Reprocess clues already reclassified by V4 (default: skip them)')
     return p.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_args()
-    asyncio.run(main(days=args.days, limit=args.limit, classification_reason=args.reason))
+    asyncio.run(main(days=args.days, limit=args.limit, classification_reason=args.reason, include_existing=args.include_existing))
