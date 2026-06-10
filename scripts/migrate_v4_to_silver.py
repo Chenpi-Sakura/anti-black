@@ -37,16 +37,27 @@ logger = logging.getLogger('migrate_v4_silver')
 
 
 def fetch_v4_clues(db, min_confidence: float, batch: int) -> list:
-    """Fetch clues reclassified by V4 with confidence >= threshold."""
+    """Fetch clues reclassified by V4 with confidence >= threshold,
+    skipping any clue_id that's already been migrated to training_samples.
+
+    V6 fix: use a NOT EXISTS subquery to avoid fetching already-migrated
+    rows — means re-running the script is idempotent even within a single
+    batch window.
+    """
     with db._get_cursor() as cur:
         cur.execute(
             """
-            SELECT clue_id, risk_label_level1, risk_label_level2,
-                   confidence, classification_reason
-            FROM antiblack.clues
-            WHERE classification_reason LIKE %s
-              AND confidence >= %s
-            ORDER BY created_at DESC
+            SELECT c.clue_id, c.risk_label_level1, c.risk_label_level2,
+                   c.confidence, c.classification_reason
+            FROM antiblack.clues c
+            WHERE c.classification_reason LIKE %s
+              AND c.confidence >= %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM antiblack.training_samples t
+                  WHERE t.collection_context = 'v4_migration'
+                    AND t.label = c.risk_label_level1
+              )
+            ORDER BY c.created_at DESC
             LIMIT %s
             """,
             ('V4 %', min_confidence, batch),
@@ -66,11 +77,16 @@ def already_migrated_count(db) -> int:
 
 
 def insert_silver_batch(db, rows: list, min_confidence: float) -> int:
-    """Insert V4-classified clues as silver training samples."""
+    """Insert V4-classified clues as silver training samples.
+
+    V6 hardening: use clue_id as sample_id to make ON CONFLICT (sample_id)
+    truly deduplicate on the clue level — re-running the script is safe.
+    """
     inserted = 0
     with db._get_cursor() as cur:
         for r in rows:
-            sample_id = f"ts_{uuid.uuid4().hex[:16]}"
+            # Use clue_id as sample_id so ON CONFLICT dedup works on clue level
+            sample_id = f"ts_{r['clue_id']}"
             try:
                 cur.execute(
                     """

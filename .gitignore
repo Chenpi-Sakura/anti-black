@@ -54,6 +54,8 @@ dist/
 models/**/*.pkl
 models/**/*.pth
 models/**/*.bin
+# Fallback models saved from wrong CWD (# scripts/ directory)
+scripts/models/
 
 # Logs
 *.log
