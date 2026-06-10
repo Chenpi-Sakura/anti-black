@@ -73,6 +73,10 @@ class DaemonScheduler:
         self._tasks.append(asyncio.create_task(self._retrain_check_loop()))
         # Phase 2.3: daily unknown category discovery
         self._tasks.append(asyncio.create_task(self._unknown_discovery_loop()))
+        # Background reclassify: 12-hourly incremental reclassify of 未知/其他 clues.
+        self._tasks.append(asyncio.create_task(self._reclassify_loop()))
+        # Background silver migration: 24-hourly V4→training_samples dump.
+        self._tasks.append(asyncio.create_task(self._silver_migration_loop()))
         # Background worker: drains deep_queue and runs batched LightRAG.
         # P1 (2026-06-07): 3 concurrent workers instead of 1. The asyncio.Queue
         # in _deep_queue is thread-safe; workers auto-load-balance. With
@@ -790,6 +794,54 @@ class DaemonScheduler:
                     logger.info("Model retrain triggered")
             except Exception as e:
                 logger.error(f"Retrain check error: {e}", exc_info=True)
+
+    async def _reclassify_loop(self):
+        """12-hourly 48h incremental reclassify for 未知/其他 clues.
+
+        Automates what was previously a manual cron step. Runs the
+        same V4 pipeline (Stage 1 rules + LLM fallback) as
+        `scripts/reclassify_unknown.py` but integrated into the daemon.
+        """
+        check_interval = 43200  # 12h
+        logger.info(
+            f"Reclassify loop started (check_interval={check_interval}s = 12h)"
+        )
+        while self._running:
+            await asyncio.sleep(check_interval)
+            if not self._running:
+                break
+            try:
+                from scripts.reclassify_unknown import main as reclassify_main
+                await reclassify_main(
+                    days=2,
+                    limit=None,
+                    classification_reason="V4 daemon auto reclassify",
+                    include_existing=False,
+                )
+            except Exception as e:
+                logger.error(f"Reclassify loop error: {e}", exc_info=True)
+
+    async def _silver_migration_loop(self):
+        """24-hourly V4→training_samples silver migration.
+
+        Automates what was previously a manual weekly step. Reads
+        clues reclassified by V4 and writes them to training_samples
+        as silver data for the next retrain. Idempotent (clue_id
+        based ON CONFLICT).
+        """
+        check_interval = 86400  # 24h
+        logger.info(
+            f"Silver migration loop started (check_interval={check_interval}s = 24h)"
+        )
+        while self._running:
+            await asyncio.sleep(check_interval)
+            if not self._running:
+                break
+            try:
+                from scripts.migrate_v4_to_silver import main as migrate_main
+                migrate_main()
+            except Exception as e:
+                logger.error(f"Silver migration loop error: {e}", exc_info=True)
 
     async def _slang_to_rule_bridge_loop(self):
         """Phase 2.2 (FR-EVO-06): slang->rule bridge evaluation.
