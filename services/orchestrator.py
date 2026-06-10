@@ -21,7 +21,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_clues",
-            "description": "搜索黑灰产情报线索数据库。根据用户查询意图，搜索相关的线索条目。",
+            "description": "按条件（关键词/风险类型/时间/平台）检索线索**列表**——适合『找一批』线索。不返回完整内容；想看单条请用 get_clue_detail。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -119,26 +119,84 @@ TOOLS = [
                 "required": ["clue_id"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_recent_clues",
+            "description": "按时间窗口检索最新线索（最近 N 小时）。比 search_clues 更适合『近期/最近/最新』类查询。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hours": {
+                        "type": "integer",
+                        "description": "回溯的小时数，默认 24",
+                        "default": 24
+                    },
+                    "risk_label_level1": {
+                        "type": "string",
+                        "description": "可选风险类型过滤：账号交易/诈骗引流/流量作弊/黑产工具/未知/其他"
+                    },
+                    "platform": {
+                        "type": "string",
+                        "description": "可选平台过滤：douyin/baidu_tieba/weibo/xiaohongshu/kuaishou"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回条数，默认 20",
+                        "default": 20
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_slang",
+            "description": "查询黑话词典（slang_mappings 表）。用户问『XX 是啥意思』或『最近新出了哪些黑话』时调用。匹配 slang_raw 或 meaning。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "slang_term": {
+                        "type": "string",
+                        "description": "黑话关键词或自然语言描述，如'出号'、'刷粉'、'加微'"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回条数，默认 20",
+                        "default": 20
+                    }
+                }
+            }
+        }
     }
 ]
 
-SYSTEM_PROMPT = """你是一个黑灰产情报分析助手，负责根据用户的查询意图搜索相关线索，并生成专业的分析报告。
+SYSTEM_PROMPT = """你是一个黑灰产情报分析助手，负责根据用户的查询意图选择合适的工具检索数据，并生成专业的分析报告。
 
-可用工具：
-1. search_clues - 搜索线索数据库
-2. kg_query - 知识图谱查询（实体、关系检索）
-3. search_entities - 搜索实体
-4. get_clue_detail - 获取线索详情
+可用工具（按用途选择，不要只用第一个）：
+- search_clues：按条件（关键词/风险类型/时间/平台）检索**一批**线索
+- get_recent_clues：按时间窗口（最近 N 小时）检索最新线索，"最近/近期/最新"类查询优先用
+- kg_query：知识图谱查询，用于"谁和谁有关联"、"实体关系网"类问题
+- search_entities：在实体库中查找特定名称/类型的实体
+- get_clue_detail：已知 clue_id 时取单条完整内容
+- search_slang：查询黑话词典，"XX 是啥意思"或"最近学到了哪些新黑话"用
 
-工作流程：
-1. 理解用户查询意图
-2. 调用适当的工具获取数据
-3. 根据结果生成分析报告
+工作流程（按需串联，不要一次全调）：
+1. 理解用户查询意图，决定先调哪个工具（默认 search_clues / get_recent_clues）
+2. 看第一个工具的结果，决定下一步是"深入"（get_clue_detail / kg_query）还是"扩展"（search_entities / search_slang）
+3. 工具结果已足够时立刻停止检索并生成报告
 
-注意：
-- 如果搜索结果为空，告诉用户未找到匹配的线索，建议调整查询条件
-- 分析报告应该包含：风险类型分布、主要涉及平台、高价值实体、关键发现
-- 保持专业、简洁的语调
+约束：
+- 单次查询最多 3 轮工具调用（系统会自动强制）
+- 工具结果已足够时立刻停止检索
+- 不要用相同参数重复调同一工具（系统会跳过）
+- 如果搜索结果为空，告诉用户未找到匹配的线索/实体/黑话，建议调整查询条件
+- **【重要】用户要求的每一个维度都必须独立调用工具获取数据。** 例如：用户要"列出实体关系和相关黑话"时，必须依次调用 kg_query 获取实体关系、**再调用 search_slang 获取黑话词典条目**。禁止仅依赖 search_clues 返回结果中内嵌的 slang_mappings 字段替代 search_slang 工具——内嵌字段只是采样，search_slang 返回的是完整的黑话词典。
+
+报告结构（按需选用）：风险类型分布 / 主要涉及平台 / 高价值实体 / 关键发现 / 黑话解读。
+保持专业、简洁的语调。
 """
 
 
@@ -210,9 +268,15 @@ class Orchestrator:
         # LLM 对话循环（支持工具调用）
         assistant_message = None
         tool_calls_executed = []
+        recent_signatures: list[tuple[str, str]] = []  # 防止重复调用
+        MAX_TOOL_ITERATIONS = 3
+        DEDUP_WINDOW = 2  # 最近 2 步内若已调过相同 (tool, args) 则跳过
 
+        iteration = 0
         while True:
             try:
+                iteration += 1
+
                 # 调用 unified LLM client (带工具;多 provider fallback 链)
                 response = await self.llm.chat_raw(
                     messages=messages,
@@ -236,12 +300,35 @@ class Orchestrator:
                 )
 
                 if needs_tool_call and hasattr(assistant_message, 'tool_calls') and assistant_message.tool_calls:
+                    # Loop guard: hit iteration cap → nudge LLM to summarize
+                    if len(recent_signatures) >= MAX_TOOL_ITERATIONS:
+                        messages.append({
+                            "role": "user",
+                            "content": "[系统] 工具调用已达上限，请基于已有结果直接生成最终报告，不要再调用工具。"
+                        })
+                        continue
+
                     # 执行工具调用
                     for tool_call in assistant_message.tool_calls:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
+                        sig = (tool_name, json.dumps(tool_args, sort_keys=True, ensure_ascii=False))
 
-                        await self._stream_progress(query_id, "retrieving", "正在检索线索...", 30, tool_name=tool_name)
+                        # Dedup: skip if same (tool, args) was called in the last DEDUP_WINDOW steps
+                        if sig in recent_signatures[-DEDUP_WINDOW:]:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": json.dumps(
+                                    {"skipped": True, "reason": "duplicate_call"},
+                                    ensure_ascii=False
+                                )
+                            })
+                            continue
+
+                        recent_signatures.append(sig)
+
+                        await self._stream_progress(query_id, "retrieving", f"正在调用 {tool_name}...", 30, tool_name=tool_name)
 
                         result = await self._execute_tool(tool_name, tool_args)
 
@@ -249,7 +336,7 @@ class Orchestrator:
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
-                            "content": json.dumps(result, ensure_ascii=False)
+                            "content": json.dumps(result, ensure_ascii=False, default=str)
                         })
                         tool_calls_executed.append({
                             "name": tool_name,
@@ -259,9 +346,10 @@ class Orchestrator:
                         })
 
                     # 获取最后一次工具调用的结果数量
-                    last_result_count = tool_calls_executed[-1]['result_count']
-                    last_tool_name = tool_calls_executed[-1]['name']
-                    await self._stream_progress(query_id, "retrieved", f"工具执行完成，找到 {last_result_count} 条线索", 50, tool_name=last_tool_name)
+                    if tool_calls_executed:
+                        last_result_count = tool_calls_executed[-1]['result_count']
+                        last_tool_name = tool_calls_executed[-1]['name']
+                        await self._stream_progress(query_id, "retrieved", f"工具执行完成，找到 {last_result_count} 条结果", 50, tool_name=last_tool_name)
 
                     # 继续对话，让 LLM 生成最终回复
                     continue
@@ -348,6 +436,18 @@ class Orchestrator:
         elif tool_name == "get_clue_detail":
             return await self._get_clue_detail(
                 clue_id=tool_args.get("clue_id", "")
+            )
+        elif tool_name == "get_recent_clues":
+            return await self._get_recent_clues(
+                hours=tool_args.get("hours", 24),
+                risk_label_level1=tool_args.get("risk_label_level1"),
+                platform=tool_args.get("platform"),
+                limit=tool_args.get("limit", 20)
+            )
+        elif tool_name == "search_slang":
+            return await self._search_slang(
+                slang_term=tool_args.get("slang_term", ""),
+                limit=tool_args.get("limit", 20)
             )
         else:
             return {"error": f"Unknown tool: {tool_name}"}
@@ -479,8 +579,13 @@ class Orchestrator:
             values = []
 
             if entity_name:
-                where_clauses.append("entity_name ILIKE %s")
-                values.append(f"%{entity_name}%")
+                # entity_name is often NULL in this table; fall back to
+                # raw_value + normalized_value to make search useful.
+                where_clauses.append(
+                    "(entity_name ILIKE %s OR raw_value ILIKE %s OR normalized_value ILIKE %s)"
+                )
+                like_pat = f"%{entity_name}%"
+                values.extend([like_pat, like_pat, like_pat])
 
             if entity_type:
                 where_clauses.append("entity_type = %s")
@@ -489,10 +594,11 @@ class Orchestrator:
             where_sql = " AND ".join(where_clauses)
 
             cur.execute(f"""
-                SELECT entity_id, entity_name, entity_type, description,
-                       source_channel, created_at
+                SELECT entity_id, entity_name, entity_type, raw_value,
+                       description, source_channel, first_seen, last_seen
                 FROM antiblack.entities
                 WHERE {where_sql}
+                ORDER BY occurrence_count DESC NULLS LAST, last_seen DESC NULLS LAST
                 LIMIT %s
             """, values + [limit])
 
@@ -544,6 +650,120 @@ class Orchestrator:
                 return obj
 
             return handle_datetime(result)
+
+    async def _get_recent_clues(
+        self,
+        hours: int = 24,
+        risk_label_level1: str = None,
+        platform: str = None,
+        limit: int = 20
+    ) -> list[dict]:
+        """按时间窗口检索最新线索。"""
+        from datetime import datetime, timedelta, timezone
+
+        conditions = ["created_at > NOW() - (%(hours)s || ' hours')::INTERVAL"]
+        params = {"hours": str(hours), "limit": limit}
+
+        # Exclude e2e + orphans by default (mirror get_clues default)
+        conditions.append("source_channel IS NOT NULL AND source_channel != '' AND source_channel != 'e2e'")
+
+        if risk_label_level1:
+            conditions.append("risk_label_level1 = %(risk_label_level1)s")
+            params["risk_label_level1"] = risk_label_level1
+        if platform:
+            conditions.append("source_channel = %(platform)s")
+            params["platform"] = platform
+
+        where_clause = " AND ".join(conditions)
+
+        with self.db._get_cursor() as cur:
+            cur.execute(f"""
+                SELECT clue_id, risk_label_level1, risk_label_level2, confidence,
+                       raw_text, cleaned_text, source_channel, published_at
+                FROM antiblack.clues
+                WHERE {where_clause}
+                ORDER BY created_at DESC
+                LIMIT %(limit)s
+            """, params)
+            rows = cur.fetchall()
+
+        return [dict(r) for r in rows]
+
+    async def _search_slang(
+        self,
+        slang_term: str = "",
+        limit: int = 20
+    ) -> list[dict]:
+        """在 slang_mappings 表里按 slang_raw 或 meaning 模糊匹配。
+
+        Schema: mapping_id, slang_raw, meaning, regex_pattern, source,
+        verified, confidence, created_at, updated_at.
+
+        LLM 通常会把整句查询塞进 slang_term（如"近三天涉及微信号的诈骗引流"），
+        所以我们按空格/标点拆成短词，构造 OR 条件匹配，提高召回率。
+        """
+        if not slang_term:
+            return []
+
+        # Extract short keywords from the slang_term.
+        # LLM often passes the full query (e.g. "近三天涉及微信号的诈骗引流"),
+        # so we slide a 2-char window over the Chinese characters to capture
+        # meaningful fragments like "微信", "诈骗", "引流" etc.
+        import re as _re
+        # 1) Extract all CJK runs from the input
+        cjk_runs = _re.findall(r'[一-鿿]+', slang_term)
+        raw = "".join(cjk_runs)
+
+        words = set()
+        # 2-gram sliding window over CJK text
+        for i in range(len(raw) - 1):
+            bigram = raw[i:i + 2]
+            if bigram.strip():
+                words.add(bigram)
+        # Also keep any 3+ char runs that contain no CJK (numbers, ASCII, etc.)
+        for token in _re.split(r'[\s,，。；;：:!！?？、/\\]+', slang_term):
+            cleaned = token.strip()
+            if cleaned and not any('一' <= c <= '鿿' for c in cleaned) and len(cleaned) >= 2:
+                words.add(cleaned)
+
+        # Limit to at most 8 keywords (safety cap)
+        words = sorted(words)[:8]
+
+        if not words:
+            # No valid keywords after split — fall back to the raw term
+            words = [slang_term]
+
+        # Build OR conditions — each word matches slang_raw or meaning
+        conditions = []
+        params: dict = {}
+        for i, w in enumerate(words):
+            key = f"p{i}"
+            conditions.append(f"(slang_raw ILIKE %({key})s OR meaning ILIKE %({key})s)")
+            params[key] = f"%{w}%"
+
+        where_clause = " OR ".join(conditions)
+        params["limit"] = limit
+
+        with self.db._get_cursor() as cur:
+            cur.execute(f"""
+                SELECT slang_raw, meaning, verified, confidence, source,
+                       created_at, updated_at
+                FROM antiblack.slang_mappings
+                WHERE {where_clause}
+                ORDER BY verified DESC, confidence DESC NULLS LAST,
+                         updated_at DESC NULLS LAST
+                LIMIT %(limit)s
+            """, params)
+            rows = cur.fetchall()
+
+        result = []
+        for r in rows:
+            d = dict(r)
+            for k in ("created_at", "updated_at"):
+                if d.get(k) and hasattr(d[k], "isoformat"):
+                    d[k] = d[k].isoformat()
+            result.append(d)
+        return result
 
     async def _stream_progress(
         self,

@@ -16,7 +16,7 @@
           <div v-for="(step, i) in message.reasoning" :key="i" class="reasoning-step">
             <span class="step-dot"></span>
             <span class="step-label">{{ step.content || getStageLabel(step.stage) }}</span>
-            <span v-if="step.tool_name" class="step-tool">{{ step.tool_name }}</span>
+            <span v-if="step.tool_name" :class="['step-tool', `tool-${step.tool_name}`]">{{ step.tool_name }}</span>
           </div>
         </div>
       </div>
@@ -255,6 +255,32 @@ function formatTime(time) {
   color: var(--color-primary);
   border-radius: 3px;
   white-space: nowrap;
+}
+
+/* Per-tool color coding.  Each tool name maps to a distinct hue so the
+   user can scan the reasoning block and tell at a glance which tools
+   the agent picked.  Color is hue-only (no brightness) so the
+   primary-blue chrome stays consistent. */
+.step-tool.tool-search_clues,
+.step-tool.tool-get_recent_clues {
+  background: rgba(0, 0, 255, 0.12);
+  color: #0000a0;
+}
+.step-tool.tool-kg_query {
+  background: rgba(128, 0, 255, 0.14);
+  color: #5b21b6;
+}
+.step-tool.tool-search_entities {
+  background: rgba(0, 153, 76, 0.14);
+  color: #15803d;
+}
+.step-tool.tool-get_clue_detail {
+  background: rgba(255, 140, 0, 0.16);
+  color: #b45309;
+}
+.step-tool.tool-search_slang {
+  background: rgba(234, 179, 8, 0.18);
+  color: #92400e;
 }
 
 @keyframes fadeSlideIn {

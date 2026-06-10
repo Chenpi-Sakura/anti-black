@@ -57,7 +57,7 @@
                   <div v-for="(step, i) in currentReasoningSteps" :key="i" class="reasoning-step">
                     <span class="step-dot active"></span>
                     <span class="step-label">{{ step.content || step.stage }}</span>
-                    <span v-if="step.tool_name" class="step-tool">{{ step.tool_name }}</span>
+                    <span v-if="step.tool_name" :class="['step-tool', `tool-${step.tool_name}`]">{{ step.tool_name }}</span>
                   </div>
                 </div>
               </div>
@@ -240,12 +240,24 @@ function handleSSEEvent(event) {
   const stage = event.stage || event.type
 
   if (stage && stage !== 'heartbeat' && stage !== 'content' && !hasStreamingAssistantMessage.value) {
-    currentReasoningSteps.value.push({
-      stage,
-      content: event.content || stage,
-      tool_name: event.tool_name,
-      time: new Date()
-    })
+    // Deduplicate: if the last step has the same tool_name, update it in place
+    // instead of appending.  The backend emits two events per tool invocation
+    // (retrieving → retrieved), both with tool_name set, which would otherwise
+    // render the tool tag twice.
+    const prev = currentReasoningSteps.value.length > 0
+      ? currentReasoningSteps.value[currentReasoningSteps.value.length - 1]
+      : null
+    if (prev && event.tool_name && prev.tool_name === event.tool_name) {
+      prev.stage = stage
+      prev.content = event.content || stage
+    } else {
+      currentReasoningSteps.value.push({
+        stage,
+        content: event.content || stage,
+        tool_name: event.tool_name,
+        time: new Date()
+      })
+    }
   }
 
   switch (event.type) {
@@ -559,6 +571,29 @@ function goToClueDetail(clueId) {
   color: var(--color-primary);
   border-radius: 3px;
   white-space: nowrap;
+}
+
+/* Per-tool color coding (see MessageBubble.vue for the canonical list) */
+.step-tool.tool-search_clues,
+.step-tool.tool-get_recent_clues {
+  background: rgba(0, 0, 255, 0.12);
+  color: #0000a0;
+}
+.step-tool.tool-kg_query {
+  background: rgba(128, 0, 255, 0.14);
+  color: #5b21b6;
+}
+.step-tool.tool-search_entities {
+  background: rgba(0, 153, 76, 0.14);
+  color: #15803d;
+}
+.step-tool.tool-get_clue_detail {
+  background: rgba(255, 140, 0, 0.16);
+  color: #b45309;
+}
+.step-tool.tool-search_slang {
+  background: rgba(234, 179, 8, 0.18);
+  color: #92400e;
 }
 
 .typing-indicator {
