@@ -54,36 +54,27 @@ def fetch_unknown_clue_ids(db, days=RECLASSIFY_DAYS, limit=DEFAULT_LIMIT, includ
     V4 hardening: by default, skip clues already reclassified by V4
     (their classification_reason starts with 'V4 '). Pass
     --include-existing to reprocess them anyway.
+
+    V5 fix: psycopg2 errors when f-string SQL has no %s placeholders but
+    a vars tuple is passed. Use only f-string interpolation here
+    (days is a validated int), no vars parameter.
     """
+    days_int = int(days)  # safe: validated int from CLI
+    limit_int = int(limit) if limit is not None else None
     existing_clause = "" if include_existing else "AND (classification_reason IS NULL OR classification_reason NOT LIKE 'V4 %')"
+    limit_clause = f"LIMIT {limit_int}" if limit_int is not None else ""
+    sql = f"""
+        SELECT clue_id, cleaned_text, source_channel
+        FROM antiblack.clues
+        WHERE risk_label_level1 = '未知/其他'
+          AND created_at > NOW() - INTERVAL '{days_int} days'
+          AND cleaned_text IS NOT NULL
+          {existing_clause}
+        ORDER BY created_at DESC
+        {limit_clause}
+    """
     with db._get_cursor() as cur:
-        if limit is None:
-            cur.execute(
-                f"""
-                SELECT clue_id, cleaned_text, source_channel
-                FROM antiblack.clues
-                WHERE risk_label_level1 = '未知/其他'
-                  AND created_at > NOW() - INTERVAL '%s days'
-                  AND cleaned_text IS NOT NULL
-                  {existing_clause}
-                ORDER BY created_at DESC
-                """,
-                (days,),
-            )
-        else:
-            cur.execute(
-                f"""
-                SELECT clue_id, cleaned_text, source_channel
-                FROM antiblack.clues
-                WHERE risk_label_level1 = '未知/其他'
-                  AND created_at > NOW() - INTERVAL '%s days'
-                  AND cleaned_text IS NOT NULL
-                  {existing_clause}
-                ORDER BY created_at DESC
-                LIMIT %s
-                """,
-                (days, limit),
-            )
+        cur.execute(sql)
         return cur.fetchall()
 
 
