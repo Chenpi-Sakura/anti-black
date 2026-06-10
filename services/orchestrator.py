@@ -6,7 +6,7 @@ import os
 import json
 import re
 import asyncio
-from typing import Optional
+from typing import Any, Optional
 
 from openai import AsyncOpenAI
 
@@ -200,6 +200,87 @@ SYSTEM_PROMPT = """你是一个黑灰产情报分析助手，负责根据用户�
 """
 
 
+def _count_tool_result(result: Any) -> int:
+    """Return a human-meaningful count for a tool's return value.
+
+    Used by the orchestrator's main loop to populate the 'found N results'
+    SSE event.  Different tools return different shapes:
+
+    - search_clues / get_recent_clues / search_entities / search_slang:
+      return a list.  Use len().
+    - kg_query: _kg_query wraps the integrator result as
+      {content, query, mode} where content is a JSON string.  Peel it.
+    - get_clue_detail: returns a single dict.  Count as 1 if found, else 0.
+    """
+    data = _peel_tool_result_data(result)
+    if data is not None:
+        return (
+            len(data.get("entities", []))
+            + len(data.get("relationships", []))
+            + len(data.get("chunks", []))
+            + len(data.get("references", []))
+        )
+    if isinstance(result, list):
+        return len(result)
+    if isinstance(result, dict):
+        if "clue_id" in result or "raw_response" in result:
+            return 1
+        return 0
+    return 0
+
+
+def _format_tool_result_summary(result: Any) -> str:
+    """Return a detailed summary string for the SSE 'retrieved' event.
+
+    For kg_query results, shows a breakdown of entities, relationships,
+    and chunks so the user knows exactly what was found.
+    """
+    data = _peel_tool_result_data(result)
+    if data is not None:
+        ents = len(data.get("entities", []))
+        rels = len(data.get("relationships", []))
+        chks = len(data.get("chunks", []))
+        parts = []
+        if ents:
+            parts.append(f"{ents} 个实体")
+        if rels:
+            parts.append(f"{rels} 个关系")
+        if chks:
+            parts.append(f"{chks} 个文本块")
+        total = ents + rels + chks
+        return f"找到 {', '.join(parts)}（共 {total} 条）"
+
+    if isinstance(result, list):
+        return f"找到 {len(result)} 条结果"
+    if isinstance(result, dict) and "clue_id" in result:
+        return "获取到 1 条线索详情"
+    return "执行完成"
+
+
+def _peel_tool_result_data(result: Any) -> dict | None:
+    """Extract the structured {entities, relationships, chunks, references}
+    dict from a tool result, regardless of whether it's wrapped under
+    ``{content: json_str, ...}`` (kg_query) or ``{data: {...}}``."""
+    if not isinstance(result, dict):
+        return None
+    # _kg_query wraps under "content" as JSON str
+    content = result.get("content")
+    if isinstance(content, str) and content.startswith("{"):
+        try:
+            import json
+            parsed = json.loads(content)
+            d = parsed.get("data")
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+    # Direct {data: {...}} path
+    d = result.get("data")
+    if isinstance(d, dict):
+        return d
+    return None
+
+
 class Orchestrator:
     """
     Agent大脑，协调LLM + Pipeline + 知识图谱
@@ -342,14 +423,15 @@ class Orchestrator:
                             "name": tool_name,
                             "args": tool_args,
                             "result": result,
-                            "result_count": len(result) if isinstance(result, list) else 0
+                            "result_count": _count_tool_result(result),
                         })
 
                     # 获取最后一次工具调用的结果数量
                     if tool_calls_executed:
-                        last_result_count = tool_calls_executed[-1]['result_count']
-                        last_tool_name = tool_calls_executed[-1]['name']
-                        await self._stream_progress(query_id, "retrieved", f"工具执行完成，找到 {last_result_count} 条结果", 50, tool_name=last_tool_name)
+                        last = tool_calls_executed[-1]
+                        last_tool_name = last['name']
+                        summary = _format_tool_result_summary(last['result'])
+                        await self._stream_progress(query_id, "retrieved", f"工具执行完成，{summary}", 50, tool_name=last_tool_name)
 
                     # 继续对话，让 LLM 生成最终回复
                     continue
@@ -552,18 +634,28 @@ class Orchestrator:
         mode: str = "hybrid",
         limit: int = 10
     ) -> dict:
-        """知识图谱查询工具实现"""
-        from services.lightrag_service import LightRAGIntegrator
+        """知识图谱查询工具实现。
+
+        LightRAG 是一个非常重的对象（Neo4j + PG + Ollama 嵌入 + 大量内存），
+        每次工具调用都构造会浪费资源。改用 lightrag_service 的进程内
+        singleton，第一次访问时初始化，后续直接复用。
+        """
+        from services.lightrag_service import get_lightrag_integrator
 
         try:
             config = self.config or get_config()
-            rag = LightRAGIntegrator(config._config)
+            integrator = await get_lightrag_integrator(config._config)
 
-            result = await rag.query(query, mode=mode, top_k=limit)
+            result = await integrator.query(query, mode=mode, top_k=limit)
 
-            if isinstance(result, str):
-                return {"content": result, "query": query, "mode": mode}
-            return {"content": str(result), "query": query, "mode": mode}
+            # result is always a dict (status / data / metadata / ...).
+            # Serialise as compact JSON so the orchestrator LLM receives
+            # a structured payload it can cite entities/relations by name.
+            return {
+                "content": json.dumps(result, ensure_ascii=False, default=str),
+                "query": query,
+                "mode": mode,
+            }
         except Exception as e:
             return {"error": f"知识图谱查询失败: {str(e)}", "query": query}
 

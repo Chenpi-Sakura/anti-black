@@ -4,12 +4,50 @@ Handles deep channel processing with knowledge graph construction.
 """
 import os
 import re
+import asyncio
 import unicodedata
 import logging
 from typing import Any, Dict, List, Optional, Union
 from functools import partial
 
 logger = logging.getLogger(__name__)
+
+
+# Process-wide singleton. The FastAPI uvicorn process and the daemon
+# scheduler process are separate Python interpreters, but inside each
+# process the LightRAGIntegrator should be created at most once —
+# `initialize()` is expensive (PG + Neo4j handshakes, table checks) and
+# the underlying `from lightrag import LightRAG` import is also heavy.
+#
+# `get_lightrag_integrator()` is the lazy, thread-safe accessor the
+# orchestrator's _kg_query tool calls per HTTP request. It returns the
+# cached instance on subsequent calls.
+_integrator_singleton: Optional["LightRAGIntegrator"] = None
+_integrator_init_lock: asyncio.Lock = asyncio.Lock()
+
+
+async def get_lightrag_integrator(config: dict) -> "LightRAGIntegrator":
+    """Return the process-wide LightRAGIntegrator, initializing it on first call.
+
+    Raises whatever initialize() raises. The caller (orchestrator._kg_query
+    or FastAPI lifespan) is expected to log + swallow init failures so the
+    API can still serve other tools while LightRAG is unreachable.
+    """
+    global _integrator_singleton
+    if _integrator_singleton is not None and _integrator_singleton._initialized:
+        return _integrator_singleton
+    async with _integrator_init_lock:
+        # Re-check after acquiring the lock — another coroutine may have
+        # initialized while we were waiting.
+        if _integrator_singleton is not None and _integrator_singleton._initialized:
+            return _integrator_singleton
+        inst = LightRAGIntegrator(config)
+        # initialize() raises on failure. We deliberately do NOT cache
+        # an uninitialized instance, so the next caller can retry.
+        await inst.initialize()
+        _integrator_singleton = inst
+        logger.info("LightRAG integrator initialized (singleton)")
+        return _integrator_singleton
 
 
 # bge-m3 (via Ollama) tends to produce NaN vectors for inputs containing:
@@ -30,18 +68,18 @@ _BAD_CONTROL_CHARS = re.compile(
 _WS_COLLAPSE = re.compile(r"\s+")
 
 
-def create_minimax_complete():
-    """Create LLM completion function (OpenAI-compatible).
+def create_lightrag_llm_complete():
+    """Create LLM completion function (OpenAI-compatible) for LightRAG.
 
     Backward-compat factory used by LightRAG. Internally delegates to the
-    unified LLMClient (multi-provider fallback chain) so the LightRAG
-    pipeline automatically benefits from provider failover.
+    unified LLMClient (multi-provider fallback chain: doubao → qwen3.6-flash)
+    so LightRAG's keyword-extraction step benefits from provider failover.
     """
     from models.clients.llm import LLMClient
 
     client = LLMClient(timeout=120)
 
-    async def minimax_complete(
+    async def lightrag_complete(
         prompt,
         system_prompt=None,
         history_messages=None,
@@ -64,7 +102,7 @@ def create_minimax_complete():
             logger.error(f"LLM call failed: {e}")
             return f"Error: {str(e)}"
 
-    return minimax_complete
+    return lightrag_complete
 
 
 def _sanitize_for_embed(text: str, max_chars: int = _MAX_EMBED_CHARS) -> str:
@@ -172,6 +210,7 @@ class LightRAGIntegrator:
         if self._initialized:
             return
 
+        rag = None  # local so the except block can finalize on partial init
         try:
             from lightrag import LightRAG
 
@@ -205,9 +244,9 @@ class LightRAGIntegrator:
             # actually feeds the PGKVStorage / PGVectorStorage constructors).
             from lightrag.utils import EmbeddingFunc
 
-            self._rag = LightRAG(
+            rag = LightRAG(
                 working_dir=working_dir,
-                llm_model_func=create_minimax_complete(),
+                llm_model_func=create_lightrag_llm_complete(),
                 embedding_func=EmbeddingFunc(
                     embedding_dim=1024,  # bge-m3 outputs 1024 dim
                     max_token_size=8192,
@@ -221,15 +260,38 @@ class LightRAGIntegrator:
                 doc_status_storage=storage_config.get('doc_status', 'PGDocStatusStorage'),
                 # Storage connection kwargs (this is the only working path for PG)
                 vector_db_storage_cls_kwargs=vector_db_kwargs,
+                # Disable LightRAG's LLM answer cache.  The orchestrator
+                # (in this same process) is itself an LLM and doesn't
+                # need LightRAG to also generate one — it only wants
+                # the raw retrieval.  Without this, a prior call to
+                # kg_query with the same text returns the cached LLM
+                # answer instead of fresh entities / relations.
+                enable_llm_cache=False,
+                enable_llm_cache_for_entity_extract=False,
             )
 
-            # Initialize storage backends
-            await self._rag.initialize_storages()
+            # Initialize storage backends (may open asyncpg pool + Neo4j driver)
+            await rag.initialize_storages()
+            self._rag = rag
             self._initialized = True
             logger.info("LightRAG initialized successfully with remote storage")
         except Exception as e:
             logger.error(f"Failed to initialize LightRAG: {e}")
             self._rag = None
+            # Best-effort cleanup so a half-constructed LightRAG (Neo4j
+            # driver + asyncpg pool opened, then a later step raised) does
+            # not leak connections.  Swallow cleanup errors so the original
+            # exception still propagates.
+            if rag is not None:
+                try:
+                    await rag.finalize_storages()
+                except Exception as cleanup_err:
+                    logger.warning(f"LightRAG cleanup after init failure also failed: {cleanup_err}")
+            # MUST re-raise: the caller (get_lightrag_integrator) depends on
+            # exceptions to know NOT to cache the failed instance.  Without
+            # this, _integrator_singleton gets set to a broken (_initialized=False)
+            # object, and lifespan logs "warmed up" even on failure.
+            raise
 
     async def finalize(self) -> None:
         """Finalize LightRAG instance."""
@@ -257,44 +319,86 @@ class LightRAGIntegrator:
     async def query(
         self,
         query_text: str,
-        mode: str = "hybrid",
+        mode: str = "mix",
         top_k: int = 10
     ) -> Dict[str, Any]:
         """
-        Query the knowledge graph.
+        Raw retrieval bypassing the LLM formatting step.
 
-        Args:
-            query_text: Query string
-            mode: Query mode (local/global/hybrid/naive/mix)
-            top_k: Number of results to return
+        Uses LightRAG's `aquery_data` — the vendored `aquery` wrapper (line 1977)
+        forcibly drops the structured JSON and returns only
+        ``llm_response.get("content", "")``.  ``aquery_data`` is the honest
+        entry point that returns the full ``{status, data: {entities,
+        relationships, chunks, references}, metadata}`` dict without ever
+        calling the LLM final-answer step.
+
+        ``only_need_context=True`` is passed as a double safety; ``aquery_data``
+        already enforces it internally.
+
+        Default ``mode='mix'`` fuses local entities, global relationships,
+        and naive vector chunks — the richest citation context for an
+        orchestrator that wants to ground its answer in both KG structure
+        and source text.
 
         Returns:
-            Query results with entities and relationships
+          {
+            "data":     {entities, relationships, chunks, references},
+            "metadata": {query_mode, keywords, processing_info, ...},
+            "status":   "success" | "failure",
+            "message":  str,
+            "query":    query_text,
+            "mode":     str,
+          }
         """
-        if not self._rag or not self._initialized:
-            logger.warning("LightRAG not initialized, returning empty results")
-            return {"results": [], "entities": [], "relationships": []}
+        from lightrag import QueryParam
+
+        if not self._initialized:
+            # Defensive: if initialize() failed and the caller didn't re-raise
+            # (should not happen after the Bug-1 fix, but keep the guard).
+            return {
+                "data": {}, "status": "failure",
+                "message": "LightRAG is not correctly initialized.",
+                "query": query_text, "mode": mode,
+            }
 
         try:
-            from lightrag import QueryParam
-
-            result = await self._rag.aquery(
-                query_text,
+            result = await self._rag.aquery_data(
+                query_text.strip(),
                 param=QueryParam(
                     mode=mode,
-                    top_k=top_k
-                )
+                    top_k=top_k,
+                    only_need_context=True,  # double safety
+                ),
             )
 
-            # Parse result
+            if isinstance(result, dict):
+                return {
+                    "data": result.get("data", {}),
+                    "metadata": result.get("metadata", {}),
+                    "status": result.get("status", "success"),
+                    "message": result.get("message", ""),
+                    "query": query_text,
+                    "mode": mode,
+                }
+
+            # Extreme edge — aquery_data returned something other than dict
             return {
-                "results": [result] if isinstance(result, str) else result,
+                "data": {},
+                "status": "warning",
+                "message": f"aquery_data returned unexpected type: {type(result).__name__}",
                 "query": query_text,
-                "mode": mode
+                "mode": mode,
             }
+
         except Exception as e:
-            logger.error(f"Failed to query LightRAG: {e}")
-            return {"results": [], "entities": [], "relationships": []}
+            logger.error(f"LightRAG raw retrieval failed: {e}", exc_info=True)
+            return {
+                "data": {},
+                "status": "failure",
+                "message": str(e),
+                "query": query_text,
+                "mode": mode,
+            }
 
     async def insert_custom_kg(
         self,
