@@ -31,35 +31,73 @@
 
 <script setup>
 import { computed } from 'vue'
-import MarkdownIt from 'markdown-it'
+import { Marked } from 'marked'
+import { markedHighlight } from 'marked-highlight'
+import hljs from 'highlight.js/lib/core'
+import javascript from 'highlight.js/lib/languages/javascript'
+import python from 'highlight.js/lib/languages/python'
+import bash from 'highlight.js/lib/languages/bash'
+import json from 'highlight.js/lib/languages/json'
+import sql from 'highlight.js/lib/languages/sql'
+import xml from 'highlight.js/lib/languages/xml'
+import css from 'highlight.js/lib/languages/css'
+import yaml from 'highlight.js/lib/languages/yaml'
+
+// Register only the languages we actually see in LLM output (SQL/JSON/bash
+// dominate). Full hljs bundle is ~1MB; core + 8 langs is ~40KB.
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('js', javascript)
+hljs.registerLanguage('python', python)
+hljs.registerLanguage('py', python)
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('sh', bash)
+hljs.registerLanguage('shell', bash)
+hljs.registerLanguage('json', json)
+hljs.registerLanguage('sql', sql)
+hljs.registerLanguage('xml', xml)
+hljs.registerLanguage('html', xml)
+hljs.registerLanguage('css', css)
+hljs.registerLanguage('yaml', yaml)
+hljs.registerLanguage('yml', yaml)
 
 const props = defineProps({
   message: { type: Object, required: true },
   role: { type: String, default: 'assistant' }
 })
 
-const md = new MarkdownIt({
-  html: true,
-  linkify: true,
-  typographer: true,
-  breaks: true
+const marked = new Marked(
+  markedHighlight({
+    langPrefix: 'hljs language-',
+    highlight(code, lang) {
+      // hljs.getLanguage is the source of truth — if the language isn't
+      // registered, fall back to HTML-escaped raw text. Calling
+      // hljs.highlight with an unregistered name throws (Unknown language).
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
+      }
+      return code
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+    }
+  })
+)
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+  // No pedantic: tolerate slightly-malformed LLM output without throwing.
 })
 
-// Format raw message text and run 8 normalization regexes (table/list/heading fixes)
-// to repair the LLM's occasionally-collapsed markdown output.
+// Render the LLM's markdown output directly. The previous regex-based
+// "newline repair" is gone: the real culprit was services/orchestrator.py
+// _chunk_text() calling .strip() on each SSE chunk, which erased the
+// leading/trailing newlines the LLM emits. Now fixed at the source — we
+// trust the markdown and let marked parse it as-is.
 const renderedContent = computed(() => {
   const text = props.message.content
   if (!text) return ''
-  const processed = text
-    .replace(/\|\|/g, '|\n|')
-    .replace(/^([ \t]*[^|\n]+?[^\s|])(\s*)(\|(?:[ \t]*[^\n|]+[ \t]*\|){2,})/gm, '$1\n\n$3')
-    .replace(/([^\n|])[ \t]*\n[ \t]*(\|(?:[ \t]*[^\n|]+[ \t]*\|){2,})/g, '$1\n\n$2')
-    .replace(/([^#\n])\s*(#{1,6}\s+)/g, '$1\n\n$2')
-    .replace(/([^\|\-\*\#\s\n])\s*(-\s+[^\n]+)/g, '$1\n\n$2')
-    .replace(/([^\|\-\*\#\s\n\[\(\{])\s*(\d+\.\s+)/g, '$1\n\n$2')
-    .replace(/(\*\*)\s*(>)/g, '$1\n\n$2')
-    .replace(/^[ \t]*(-{3,}|—+)[ \t]*$/gm, '\n\n---\n\n')
-  return md.render(processed)
+  return marked.parse(text)
 })
 
 function getStageLabel(stage) {
@@ -162,10 +200,35 @@ function formatTime(time) {
 .message-text :deep(table th) { background: #f6f8fa; font-weight: 600; }
 .message-text :deep(table tr:nth-child(even) td) { background: #fafbfc; }
 .message-text :deep(pre) {
-  background: #f6f8fa; padding: 12px 16px; border-radius: 6px;
-  overflow-x: auto; margin: 0.8em 0; border: 1px solid var(--color-border);
+  background: #1e1e2e; padding: 12px 16px; border-radius: 6px;
+  overflow-x: auto; margin: 0.8em 0; border: 1px solid #2a2a3a;
 }
-.message-text :deep(pre code) { background: none; padding: 0; color: inherit; font-size: var(--font-size-sm); }
+.message-text :deep(pre code) {
+  background: none; padding: 0; color: #cdd6f4;
+  font-size: var(--font-size-sm); font-family: var(--font-mono);
+}
+/* highlight.js token colors — Catppuccin Mocha-inspired palette, designed
+   for dark backgrounds. Inline `code` (no <pre>) keeps the original light
+   styling; only block code uses these. */
+.message-text :deep(.hljs-keyword),
+.message-text :deep(.hljs-selector-tag),
+.message-text :deep(.hljs-built_in) { color: #cba6f7; }
+.message-text :deep(.hljs-string),
+.message-text :deep(.hljs-attr),
+.message-text :deep(.hljs-title.class_) { color: #a6e3a1; }
+.message-text :deep(.hljs-number),
+.message-text :deep(.hljs-literal) { color: #fab387; }
+.message-text :deep(.hljs-comment),
+.message-text :deep(.hljs-quote) { color: #6c7086; font-style: italic; }
+.message-text :deep(.hljs-variable),
+.message-text :deep(.hljs-template-variable),
+.message-text :deep(.hljs-name) { color: #f38ba8; }
+.message-text :deep(.hljs-function),
+.message-text :deep(.hljs-title.function_) { color: #89b4fa; }
+.message-text :deep(.hljs-type),
+.message-text :deep(.hljs-class .hljs-title) { color: #f9e2af; }
+.message-text :deep(.hljs-tag),
+.message-text :deep(.hljs-meta) { color: #f5c2e7; }
 .message-text :deep(blockquote) {
   border-left: 3px solid var(--color-primary); margin: 0.8em 0;
   padding: 8px 16px; color: var(--color-text-secondary);

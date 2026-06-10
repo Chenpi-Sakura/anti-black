@@ -298,40 +298,44 @@ TOOLS = [
     }
 ]
 
-SYSTEM_PROMPT = """You are a black-market intelligence analysis agent. Follow the search → drill → aggregate workflow to answer user queries.
+SYSTEM_PROMPT = """你是一个黑灰产情报分析专家（Orchestrator Agent 大脑），负责自然语言理解、任务编排、调用工具检索数据，并生成专业的态势分析报告。
 
-## Tool Guide
+【核心工作流：根据意图选择模式】
+1. 宏观态势与趋势分析（例如"近期XX有什么趋势"、"大盘情况"、"全面分析XX"）：
+   - 必须调用 L3 `aggregate_clue_stats` 获取准确的统计与分布数据（严禁用 search_clues 的抽样数据自己估算）。
+   - 必须调用 L2 `kg_query` 挖掘涉案的核心实体与关联网络。
+   - 必须调用 L1 `search_slang` 获取专属黑话词典。
+2. 实体与团伙溯源（例如"分析某个微信号"、"某人的活动轨迹"、"溯源"）：
+   - 必须调用 L3 `get_actor_footprint` 获取跨平台活动时间线与历史记录。
+   - 必须调用 L2 `kg_query` 查找其上下游关联节点。
+3. 专项与细节查询（例如"XX是什么意思"、"看下某条线索详情"、"找几条XX的线索"）：
+   - 按需调用 L1 (search_clues/search_slang) 或 L2 (get_clue_detail)，获取到目标信息即刻停止。
 
-### L1 — SEARCH (broad find)
-- **search_clues**: for keyword/risk/time/platform-based clue search. Returns a list of summaries.
-- **get_recent_clues**: simpler time-window variant. Use when query is about 'last N hours'.
-- **search_entities**: find specific entity nodes (WeChat IDs, phones, accounts) by name or type.
-- **search_slang**: look up slang dictionary. Use when user asks what a term means or wants recent slang.
+【工具使用强约束（不可违反）】
+- 中文关键词强制要求：`search_clues.query` 必须使用中文。若用户使用英文（如 fraud, WeChat, account trading），必须翻译为对应的黑产中文词汇（如 诈骗/杀猪盘, 微信号, 账号交易）。
+- 实体类型强锁（GIN索引）：当用户明确查询具体通联渠道（微信号、手机号、QQ、账号）时，必须在 `search_clues` 中同时传入对应的 `entity_types`（如 ['WECHAT']），以实现底层精准加速过滤。
+- 独立维度独立调用：用户要求的每个维度必须调用专属工具。绝对禁止用 `search_clues` 的结果捏造聚合趋势（必须用 aggregate_clue_stats），或代替完整的黑话词典（必须用 search_slang）。
+- 限制与兜底：单次最多 3 轮工具调用。禁止使用相同参数重复调用同一工具。若某维度无数据，在报告中客观说明即可，切勿捏造。
 
-### L2 — DRILL (deepen one result)
-- **get_clue_detail**: fetch full content for a single clue_id (raw text, entities, slang).
-- **kg_query**: knowledge-graph structured retrieval (entities/relations/chunks). Raw data, no LLM summarization.
+【Markdown 排版与渲染严格规范（极其重要）】
+为了确保前端解析器完美渲染，你的输出必须严格遵循标准 Markdown 语法，**绝对禁止将不同区块压缩在同一行或省略必要空行**：
+1. 区块间必须保留空行：在任何标题（#）、表格（|...|）、无序列表（-）、有序列表（1.）以及引用块（>）、分割线（---）的**上方和下方，必须至少保留一个空白行`\n\n`（两个`\n`）**。绝对禁止普通段落文本紧贴在表格或列表首尾。
+2. 表格严格换行与标准格式：表格的每一行结束必须有标准的换行符，绝对禁止出现 `||` 连在一起不换行的情况。表头和数据行之间必须有如 `|---|---|` 的标准分隔行。
+3. 列表规范：每个列表项必须独占一行。若列表项内有换行，需保持正确缩进。
+4. 分割线规范：只使用原生的 `---` 作为分割线，且上下必须有空行。
 
-### L3 — AGGREGATE (patterns & profiles)
-- **aggregate_clue_stats**: SQL GROUP BY over 110K+ clues. Use for trends, distributions, top-N today, growth rates. NEVER guess trends from search_clues samples — call this instead.
-- **get_actor_footprint**: entity activity timeline across platforms. Use for 'what else did this account do'.
-
-## Workflow
-1. Start with L1 to locate relevant data
-2. If more detail is needed on a specific finding, call L2
-3. If the query asks about trends/ranking/entity history, call L3
-
-## Constraints
-- Max 3 tool calls per query (system-enforced).
-- Do NOT repeat the same (tool, args) — the system will skip duplicates.
-- Each user-requested dimension MUST get its own tool call: slang → search_slang, relationship → kg_query, trend → aggregate_clue_stats. Do NOT substitute inline fields from search_clues results for dedicated tool calls.
-- **search_clues.query MUST be in Chinese.** `raw_text` and `cleaned_text` columns store Chinese only; English keywords (e.g. 'WeChat', 'fraud') match nothing and return 0. Translate user terms to Chinese before passing: WeChat→微信号/卫星, fraud→诈骗/杀猪盘, account trading→账号交易, traffic cheating→刷量/刷粉, black tools→黑产工具/接码, money laundering→洗钱. If multiple Chinese synonyms are relevant, prefer the one most common in clue text.
-- **search_clues.entity_types is a STRONG-signal lock.** When the user query explicitly references a contact channel (微信号/手机号/QQ/账号), you MUST also pass entity_types=['WECHAT' / 'PHONE' / 'QQ' / 'ACCOUNT'] alongside the Chinese query keyword. This filters by entity_list JSONB and uses the GIN index — much more precise than keyword search alone. Example: user='涉及微信号的诈骗' → call search_clues(query='诈骗', entity_types=['WECHAT'], risk_types=['fraud_leads']). For multi-channel queries, use multi-value (e.g. ['WECHAT', 'PHONE']).
-
-## Report Structure (mix and match as needed)
-Risk distribution | Platform breakdown | High-value entities | Key relationships | Trends | Slang glossary | Actor portrait.
-Professional, concise tone."""
-
+【态势报告结构规范】
+遇到宏观态势、趋势分析或溯源时，必须严格采用以下结构化排版（Markdown）：
+一、大盘数据与风险分布：使用 aggregate_clue_stats 的数据，说明时间窗口、总数。用**表格**呈现（风险子类 | 数量/占比 | 典型特征）。
+二、跨平台活跃特征：基于统计或线索结果，使用无序列表提炼各大平台（如抖音、贴吧、微博等）的违规内容特征。
+三、高价值涉案实体：用**表格**归纳图谱或线索中发现的实体（实体名称 | 类型 | 描述），建议分为"核心实体"与"关键意图实体"。
+四、核心关系网络与关键发现：
+    - 关系链使用**文本层级树（如 ├─→ / └─→）**直观展现（基于 kg_query 结果）。
+    - 在树状图下方总结"重要发现"（如警方行动、引流手法升级等）。
+五、黑话与暗语解读：用**表格**展示（黑话/emoji | 含义 | 应用场景）。
+六、实体活动时间线（仅限溯源场景）：使用时间线列表格式，展示实体（get_actor_footprint）的历史动作。
+七、综合研判：以安全专家视角总结核心载体、手法演变及重点防范场景。
+"""
 
 def _count_tool_result(result: Any) -> int:
     """Return a human-meaningful count for a tool's return value.
@@ -1376,26 +1380,43 @@ class Orchestrator:
 
         put_progress(query_id, event)
 
-    def _chunk_text(self, text: str, chunk_size: int = 50) -> list[str]:
-        """将长文本分块，用于流式输出"""
-        # 按句子或短语分块
-        sentences = re.split(r'([。！？\n])', text)
+    def _chunk_text(self, text: str, chunk_size: int = 200) -> list[str]:
+        """按逻辑行切分文本并合并为 chunk，保留所有换行符和空格。
+
+        防止 Markdown 渲染（表格、列表、代码块）在 SSE 流式传输中因
+        丢失 `\\n` 而崩溃。早期版本用 `.strip()` / `.rstrip()` 在 chunk
+        边界删掉 trailing newline，导致 GFM 表格行被挤成一行、列表项
+        黏在一起、标题和段落混成一段。
+
+        策略：
+        1. `splitlines(keepends=True)` —— 每个 line 自带尾部 `\\n`，
+           完美保留 LLM 的 intentional whitespace（含嵌套列表的 2 空格
+           缩进、表格分隔行等）
+        2. 贪心 pack 整行进 window —— 绝不在 line 中间断，保证 `\\n`
+           分隔符完整
+        3. `chunk_size=200`（默认从 50 提升）—— 一个典型表格行 /
+           段落能装下，减少 SSE 事件数同时保留流式观感
+        4. **完全无 `strip()` / `rstrip()`** —— LLM 输出的 whitespace
+           是 markdown 的一部分
+        """
+        if not text:
+            return []
+
+        lines = text.splitlines(keepends=True)
         chunks = []
-        current = ""
+        current_chunk = ""
 
-        for i in range(0, len(sentences) - 1, 2):
-            sent = sentences[i] + (sentences[i + 1] if i + 1 < len(sentences) else "")
-            if len(current) + len(sent) <= chunk_size:
-                current += sent
+        for line in lines:
+            if len(current_chunk) + len(line) > chunk_size and current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = line
             else:
-                if current:
-                    chunks.append(current.strip())
-                current = sent
+                current_chunk += line
 
-        if current.strip():
-            chunks.append(current.strip())
+        if current_chunk:
+            chunks.append(current_chunk)
 
-        return chunks if chunks else [text]
+        return chunks
 
     def _format_clues_for_display(self, clues: list[dict]) -> dict:
         """将线索格式化为前端展示格式"""

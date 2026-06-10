@@ -34,12 +34,13 @@
 
         <!-- 消息列表 -->
         <div class="messages-list">
-          <MessageBubble
-            v-for="(msg, index) in messages"
-            :key="index"
-            :message="msg"
-            :role="msg.role"
-          />
+          <template v-for="(msg, index) in messages" :key="index">
+            <MessageBubble
+              v-if="msg && msg.role"
+              :message="msg"
+              :role="msg.role"
+            />
+          </template>
 
           <!-- 流式处理中的 AI 消息 -->
           <div
@@ -159,7 +160,11 @@ async function loadConversation(conversationId) {
     const res = await conversationApi.get(conversationId)
     if (res.data?.data) {
       currentConversationId.value = conversationId
-      messages.value = res.data.data.messages || []
+      // Defensively filter out null/empty entries — legacy conversations in
+      // the DB may have been written with null messages (e.g. aborted
+      // streams). MessageBubble v-for chokes on null `msg`.
+      const raw = res.data.data.messages || []
+      messages.value = raw.filter(m => m && typeof m === 'object' && m.role)
       clueResults.value = []
       currentProgress.value = ''
       currentReasoningSteps.value = []
