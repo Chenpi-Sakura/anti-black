@@ -4,6 +4,7 @@ Orchestrator Agent - 主控Agent大脑
 """
 import os
 import json
+import logging
 import re
 import asyncio
 from typing import Any, Optional
@@ -14,38 +15,47 @@ from api.routes.queries import put_progress
 from services.database import PostgreSQLService
 from config import get_config
 
+logger = logging.getLogger(__name__)
 
-# 工具定义
+
+# 工具定义 — 三层工作流：search → drill → aggregate
+# Each tool description is written for the LLM, not for humans.
+# Descriptions are imperative: when to call, what it returns, edge cases.
 TOOLS = [
+    # =========================== L1: SEARCH ===========================
     {
         "type": "function",
         "function": {
             "name": "search_clues",
-            "description": "按条件（关键词/风险类型/时间/平台）检索线索**列表**——适合『找一批』线索。不返回完整内容；想看单条请用 get_clue_detail。",
+            "description": "Search clues by keyword / risk_type / time / platform. Returns a LIST of clue summaries (no full text). Use for broad queries like 'find recent clue text about X'. For single-clue detail use get_clue_detail. Supports multi-value filters via array params.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "搜索关键词，如'账号买卖'、'抖音出号'等"
+                        "description": "Keyword(s) to match against clue text, e.g. account_trading, Douyin_username, WeChat"
                     },
                     "time_range": {
-                        "type": "string",
-                        "description": "时间范围，如'近三天'、'近一周'、'近一个月'"
+                        "type": "object",
+                        "description": "Time window as {amount, unit}. E.g. {amount:1, unit:'day'} = last 1 day, {amount:7, unit:'day'} = last 7 days, omit = search all-time (no time filter).",
+                        "properties": {
+                            "amount": {"type": "integer", "description": "How many units back, e.g. 1, 7, 30"},
+                            "unit": {"type": "string", "description": "Time unit: 'day', 'hour', 'week', 'month'"}
+                        }
                     },
                     "risk_types": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "风险类型列表，可选：账号交易, 诈骗引流, 流量作弊, 黑产工具, 未知/其他"
+                        "description": "Risk level1 filter: account_trading, fraud_leads, traffic_cheating, black_tools, money_laundering, unknown, irrelevant. Supply as array — multi-value supported."
                     },
                     "platforms": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "平台列表，可选：抖音, 贴吧, Telegram, 论坛（不填则不限制平台）"
+                        "description": "Platform filter: douyin, baidu_tieba, weibo, xiaohongshu, kuaishou, telegram. Multi-value supported."
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回结果数量限制，默认50条",
+                        "description": "Max results to return. 50 by default.",
                         "default": 50
                     }
                 }
@@ -55,48 +65,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "kg_query",
-            "description": "知识图谱查询。搜索实体、关系和文本块，支持混合检索模式。",
+            "name": "get_recent_clues",
+            "description": "Simpler time-window alternative to search_clues. Parameters: hours (int, default 24), risk_label_level1, platform. Use when user asks 'last N hours' without needing keyword/or-platform-list filters.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "查询文本，如'抖音账号买卖的关系'"
+                    "hours": {
+                        "type": "integer",
+                        "description": "Look-back window in hours. Default 24 (last 24h).",
+                        "default": 24
                     },
-                    "mode": {
+                    "risk_label_level1": {
                         "type": "string",
-                        "description": "检索模式：local(实体优先), global(关系优先), hybrid(混合), mix(平衡), naive(纯向量)",
-                        "default": "hybrid"
+                        "description": "Single risk type filter (optional): account_trading, fraud_leads, traffic_cheating, black_tools, money_laundering, unknown, irrelevant. Only one allowed."
+                    },
+                    "platform": {
+                        "type": "string",
+                        "description": "Single platform filter (optional): douyin, baidu_tieba, weibo, xiaohongshu, kuaishou."
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回结果数量限制",
-                        "default": 10
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_entities",
-            "description": "在知识图谱中搜索实体。查找特定名称或类型的实体节点。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "entity_name": {
-                        "type": "string",
-                        "description": "实体名称关键词"
-                    },
-                    "entity_type": {
-                        "type": "string",
-                        "description": "实体类型筛选，如'微信号'、'账号'"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "返回结果数量限制",
+                        "description": "Max results. Default 20.",
                         "default": 20
                     }
                 }
@@ -106,44 +95,22 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "get_clue_detail",
-            "description": "获取线索的详细信息。",
+            "name": "search_entities",
+            "description": "Search entity DB (WeChat IDs, phone numbers, QQ, accounts) by name or type. Returns matching entity nodes with metadata. Use when user mentions a specific identifier or wants to find known entities.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "clue_id": {
+                    "entity_name": {
                         "type": "string",
-                        "description": "线索ID"
-                    }
-                },
-                "required": ["clue_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_recent_clues",
-            "description": "按时间窗口检索最新线索（最近 N 小时）。比 search_clues 更适合『近期/最近/最新』类查询。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "hours": {
-                        "type": "integer",
-                        "description": "回溯的小时数，默认 24",
-                        "default": 24
+                        "description": "Entity name keyword, e.g. 'WeChat', 'account', or a specific ID"
                     },
-                    "risk_label_level1": {
+                    "entity_type": {
                         "type": "string",
-                        "description": "可选风险类型过滤：账号交易/诈骗引流/流量作弊/黑产工具/未知/其他"
-                    },
-                    "platform": {
-                        "type": "string",
-                        "description": "可选平台过滤：douyin/baidu_tieba/weibo/xiaohongshu/kuaishou"
+                        "description": "Entity type filter: WeChat, phone, QQ, account. Optional."
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回条数，默认 20",
+                        "description": "Max results. Default 20.",
                         "default": 20
                     }
                 }
@@ -154,50 +121,162 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_slang",
-            "description": "查询黑话词典（slang_mappings 表）。用户问『XX 是啥意思』或『最近新出了哪些黑话』时调用。匹配 slang_raw 或 meaning。",
+            "description": "Look up slang terms in the slang dictionary (slang_mappings table). Matches against slang_raw or meaning column. Call when user asks 'what does XX mean' or wants to see recent slang. For comprehensive slang coverage use this tool — search_clues only has sampled slang_mappings on its results.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "slang_term": {
                         "type": "string",
-                        "description": "黑话关键词或自然语言描述，如'出号'、'刷粉'、'加微'"
+                        "description": "Slang keyword or description, e.g. 'chuhao' (account selling), 'shuafen' (fake followers). Long sentences are auto-split into 2-gram keywords."
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "返回条数，默认 20",
+                        "description": "Max results. Default 20.",
                         "default": 20
                     }
                 }
             }
         }
+    },
+    # =========================== L2: DRILL ===========================
+    {
+        "type": "function",
+        "function": {
+            "name": "get_clue_detail",
+            "description": "Fetch a single clue's full content by clue_id. Returns raw_text, entity_list, slang_mappings, graph_relations. Call AFTER search_clues when a specific clue_id needs deeper inspection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "clue_id": {
+                        "type": "string",
+                        "description": "The clue_id, e.g. 'clue_20260608_063205_d5d63ebb'. Required."
+                    }
+                },
+                "required": ["clue_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "kg_query",
+            "description": "Knowledge-graph structured retrieval (entities ↔ relationships ↔ chunks). Returns raw structured data — NO LLM summarization. Use for 'who is connected to whom', 'entity relationship network', or 'find related entities around X'. Returns a dict with entities/relationships/chunks/references.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query text, e.g. 'Douyin account trading relationships', 'WeChat fraud connections'"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "Search mode: local (entity-first), global (relationship-first), hybrid (balanced), mix (entity + relation + vector chunks, best for comprehensive retrieval), naive (pure vector)",
+                        "default": "hybrid"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max entities/relationships/chunks to return per category. 10 by default.",
+                        "default": 10
+                    }
+                }
+            }
+        }
+    },
+    # =========================== L3: AGGREGATE ===========================
+    {
+        "type": "function",
+        "function": {
+            "name": "aggregate_clue_stats",
+            "description": "AGGREGATE (not search). SQL GROUP BY on 110K+ clues — count distribution by risk_type, platform, or cross-dimension. Use for 'trend', 'today breakdown', 'top 3', 'growth rate', 'change over time' queries. NOT a search tool — does NOT return individual clue text. When user asks about trends/ranking/distribution, ALWAYS call this first instead of guessing from search_clues samples.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "time_range": {
+                        "type": "object",
+                        "description": "Time window as {amount, unit}. E.g. {amount:1, unit:'day'} = today, {amount:30, unit:'day'} = this month. Omit or set amount=0 for all-time.",
+                        "properties": {
+                            "amount": {"type": "integer", "description": "How many units back, e.g. 1, 7, 30"},
+                            "unit": {"type": "string", "description": "Time unit: 'day', 'hour', 'week', 'month'"}
+                        }
+                    },
+                    "group_by": {
+                        "type": "string",
+                        "description": "Aggregation dimension: 'risk_type' (by risk only), 'platform' (by channel only, same as 'channel'), 'risk_platform' (cross by risk+platform). Default: risk_platform.",
+                        "default": "risk_platform"
+                    },
+                    "risk_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional risk type filter for the aggregation scope: account_trading, fraud_leads, traffic_cheating, black_tools, money_laundering, unknown, irrelevant."
+                    },
+                    "platforms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional platform filter: douyin, baidu_tieba, weibo, xiaohongshu, kuaishou."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_actor_footprint",
+            "description": "Entity activity timeline across platforms. Input a WeChat ID / phone / QQ, returns: timeline by date+channel, risk label history, recent clues, entity metadata. Use for 'what else did this account do', 'actor profile/portrait', 'track record across channels'. entity_type is optional but helps precision when known.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity_value": {
+                        "type": "string",
+                        "description": "Entity identifier: WeChat ID, phone number, QQ number, or any source_author_id. Required."
+                    },
+                    "entity_type": {
+                        "type": "string",
+                        "description": "Entity type hint (optional, narrows entity-table search): 'WeChat', 'phone', 'QQ', 'account'."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max recent clues to return. Default 50.",
+                        "default": 50
+                    }
+                },
+                "required": ["entity_value"]
+            }
+        }
     }
 ]
 
-SYSTEM_PROMPT = """你是一个黑灰产情报分析助手，负责根据用户的查询意图选择合适的工具检索数据，并生成专业的分析报告。
+SYSTEM_PROMPT = """You are a black-market intelligence analysis agent. Follow the search → drill → aggregate workflow to answer user queries.
 
-可用工具（按用途选择，不要只用第一个）：
-- search_clues：按条件（关键词/风险类型/时间/平台）检索**一批**线索
-- get_recent_clues：按时间窗口（最近 N 小时）检索最新线索，"最近/近期/最新"类查询优先用
-- kg_query：知识图谱查询，用于"谁和谁有关联"、"实体关系网"类问题
-- search_entities：在实体库中查找特定名称/类型的实体
-- get_clue_detail：已知 clue_id 时取单条完整内容
-- search_slang：查询黑话词典，"XX 是啥意思"或"最近学到了哪些新黑话"用
+## Tool Guide
 
-工作流程（按需串联，不要一次全调）：
-1. 理解用户查询意图，决定先调哪个工具（默认 search_clues / get_recent_clues）
-2. 看第一个工具的结果，决定下一步是"深入"（get_clue_detail / kg_query）还是"扩展"（search_entities / search_slang）
-3. 工具结果已足够时立刻停止检索并生成报告
+### L1 — SEARCH (broad find)
+- **search_clues**: for keyword/risk/time/platform-based clue search. Returns a list of summaries.
+- **get_recent_clues**: simpler time-window variant. Use when query is about 'last N hours'.
+- **search_entities**: find specific entity nodes (WeChat IDs, phones, accounts) by name or type.
+- **search_slang**: look up slang dictionary. Use when user asks what a term means or wants recent slang.
 
-约束：
-- 单次查询最多 3 轮工具调用（系统会自动强制）
-- 工具结果已足够时立刻停止检索
-- 不要用相同参数重复调同一工具（系统会跳过）
-- 如果搜索结果为空，告诉用户未找到匹配的线索/实体/黑话，建议调整查询条件
-- **【重要】用户要求的每一个维度都必须独立调用工具获取数据。** 例如：用户要"列出实体关系和相关黑话"时，必须依次调用 kg_query 获取实体关系、**再调用 search_slang 获取黑话词典条目**。禁止仅依赖 search_clues 返回结果中内嵌的 slang_mappings 字段替代 search_slang 工具——内嵌字段只是采样，search_slang 返回的是完整的黑话词典。
+### L2 — DRILL (deepen one result)
+- **get_clue_detail**: fetch full content for a single clue_id (raw text, entities, slang).
+- **kg_query**: knowledge-graph structured retrieval (entities/relations/chunks). Raw data, no LLM summarization.
 
-报告结构（按需选用）：风险类型分布 / 主要涉及平台 / 高价值实体 / 关键发现 / 黑话解读。
-保持专业、简洁的语调。
-"""
+### L3 — AGGREGATE (patterns & profiles)
+- **aggregate_clue_stats**: SQL GROUP BY over 110K+ clues. Use for trends, distributions, top-N today, growth rates. NEVER guess trends from search_clues samples — call this instead.
+- **get_actor_footprint**: entity activity timeline across platforms. Use for 'what else did this account do'.
+
+## Workflow
+1. Start with L1 to locate relevant data
+2. If more detail is needed on a specific finding, call L2
+3. If the query asks about trends/ranking/entity history, call L3
+
+## Constraints
+- Max 3 tool calls per query (system-enforced).
+- Do NOT repeat the same (tool, args) — the system will skip duplicates.
+- Each user-requested dimension MUST get its own tool call: slang → search_slang, relationship → kg_query, trend → aggregate_clue_stats. Do NOT substitute inline fields from search_clues results for dedicated tool calls.
+
+## Report Structure (mix and match as needed)
+Risk distribution | Platform breakdown | High-value entities | Key relationships | Trends | Slang glossary | Actor portrait.
+Professional, concise tone."""
 
 
 def _count_tool_result(result: Any) -> int:
@@ -211,21 +290,32 @@ def _count_tool_result(result: Any) -> int:
     - kg_query: _kg_query wraps the integrator result as
       {content, query, mode} where content is a JSON string.  Peel it.
     - get_clue_detail: returns a single dict.  Count as 1 if found, else 0.
+    - aggregate_clue_stats: dict with ``total_clues`` key.
+    - get_actor_footprint: dict with ``summary.total_clues_found``.
     """
-    data = _peel_tool_result_data(result)
-    if data is not None:
-        return (
-            len(data.get("entities", []))
-            + len(data.get("relationships", []))
-            + len(data.get("chunks", []))
-            + len(data.get("references", []))
-        )
-    if isinstance(result, list):
-        return len(result)
     if isinstance(result, dict):
+        # aggregate_clue_stats
+        tc = result.get("total_clues")
+        if tc is not None:
+            return int(tc)
+        # get_actor_footprint
+        sm = result.get("summary")
+        if isinstance(sm, dict) and "total_clues_found" in sm:
+            return int(sm["total_clues_found"])
+        # kg_query: peel content JSON for data.entities/relationships/chunks
+        data = _peel_tool_result_data(result)
+        if data is not None:
+            return (
+                len(data.get("entities", []))
+                + len(data.get("relationships", []))
+                + len(data.get("chunks", []))
+                + len(data.get("references", []))
+            )
+        # get_clue_detail / raw_response
         if "clue_id" in result or "raw_response" in result:
             return 1
-        return 0
+    if isinstance(result, list):
+        return len(result)
     return 0
 
 
@@ -233,27 +323,45 @@ def _format_tool_result_summary(result: Any) -> str:
     """Return a detailed summary string for the SSE 'retrieved' event.
 
     For kg_query results, shows a breakdown of entities, relationships,
-    and chunks so the user knows exactly what was found.
+    and chunks.  For aggregate_clue_stats, shows total clue count.
+    For get_actor_footprint, shows channel + clue summary.
     """
-    data = _peel_tool_result_data(result)
-    if data is not None:
-        ents = len(data.get("entities", []))
-        rels = len(data.get("relationships", []))
-        chks = len(data.get("chunks", []))
-        parts = []
-        if ents:
-            parts.append(f"{ents} 个实体")
-        if rels:
-            parts.append(f"{rels} 个关系")
-        if chks:
-            parts.append(f"{chks} 个文本块")
-        total = ents + rels + chks
-        return f"找到 {', '.join(parts)}（共 {total} 条）"
+    if isinstance(result, dict):
+        # aggregate_clue_stats
+        tc = result.get("total_clues")
+        if tc is not None:
+            gb = result.get("group_by", "")
+            return f"共 {int(tc):,} 条线索（分组: {gb}）"
+
+        # get_actor_footprint
+        sm = result.get("summary")
+        if isinstance(sm, dict):
+            chs = sm.get("channels", [])
+            clo = sm.get("total_clues_found", 0)
+            return f"实体 在 {len(chs)} 个渠道共 {int(clo)} 条活跃记录"
+
+        # kg_query: peel content JSON
+        data = _peel_tool_result_data(result)
+        if data is not None:
+            ents = len(data.get("entities", []))
+            rels = len(data.get("relationships", []))
+            chks = len(data.get("chunks", []))
+            parts = []
+            if ents:
+                parts.append(f"{ents} 个实体")
+            if rels:
+                parts.append(f"{rels} 个关系")
+            if chks:
+                parts.append(f"{chks} 个文本块")
+            total = ents + rels + chks
+            return f"找到 {', '.join(parts)}（共 {total} 条）"
+
+        # get_clue_detail
+        if "clue_id" in result:
+            return "获取到 1 条线索详情"
 
     if isinstance(result, list):
         return f"找到 {len(result)} 条结果"
-    if isinstance(result, dict) and "clue_id" in result:
-        return "获取到 1 条线索详情"
     return "执行完成"
 
 
@@ -279,6 +387,39 @@ def _peel_tool_result_data(result: Any) -> dict | None:
     if isinstance(d, dict):
         return d
     return None
+
+
+def _parse_time_window(time_range: Any) -> tuple[Optional[str], Optional[str]]:
+    """Convert structured time_range ``{amount: N, unit: 'day'|'hour'|'week'|'month'}``
+    to (start_iso, end_iso) in Asia/Shanghai timezone.
+
+    Returns (None, None) when time_range is None, empty, or malformed
+    (meaning the caller should apply no time filter).
+    """
+    from datetime import datetime, timedelta, timezone as dt_timezone
+
+    if not isinstance(time_range, dict):
+        return (None, None)
+
+    amount = time_range.get("amount", 0)
+    unit = time_range.get("unit", "day")
+    if not amount or amount <= 0:
+        return (None, None)
+
+    unit_map = {
+        "hour": timedelta(hours=1),
+        "day": timedelta(days=1),
+        "week": timedelta(weeks=1),
+        "month": timedelta(days=30),
+    }
+    delta = unit_map.get(unit)
+    if delta is None:
+        return (None, None)
+
+    now = datetime.now(dt_timezone(timedelta(hours=8)))
+    start = (now - delta * amount).isoformat()
+    end = now.isoformat()
+    return (start, end)
 
 
 class Orchestrator:
@@ -389,7 +530,9 @@ class Orchestrator:
                         })
                         continue
 
-                    # 执行工具调用
+                    # 并行执行工具调用
+                    # 收集所有非重复的 tool calls
+                    pending_calls = []  # list of (tool_call, tool_name, tool_args)
                     for tool_call in assistant_message.tool_calls:
                         tool_name = tool_call.function.name
                         tool_args = json.loads(tool_call.function.arguments)
@@ -408,32 +551,38 @@ class Orchestrator:
                             continue
 
                         recent_signatures.append(sig)
+                        pending_calls.append((tool_call, tool_name, tool_args))
 
-                        await self._stream_progress(query_id, "retrieving", f"正在调用 {tool_name}...", 30, tool_name=tool_name)
+                    if pending_calls:
+                        # 并行发起所有工具调用
+                        async def _run_one(tc, tn, ta):
+                            await self._stream_progress(query_id, "stage", f"正在调用 {tn}...", 30, tool_name=tn)
+                            return tc, tn, ta, await self._execute_tool(tn, ta)
 
-                        result = await self._execute_tool(tool_name, tool_args)
+                        tasks = [_run_one(tc, tn, ta) for tc, tn, ta in pending_calls]
 
-                        # 将工具结果添加回消息
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": json.dumps(result, ensure_ascii=False, default=str)
-                        })
-                        tool_calls_executed.append({
-                            "name": tool_name,
-                            "args": tool_args,
-                            "result": result,
-                            "result_count": _count_tool_result(result),
-                        })
+                        # 逐条处理完成的结果（as_completed 按完成顺序 yield）
+                        for coro in asyncio.as_completed(tasks):
+                            tc, tn, ta, result = await coro
 
-                    # 获取最后一次工具调用的结果数量
-                    if tool_calls_executed:
-                        last = tool_calls_executed[-1]
-                        last_tool_name = last['name']
-                        summary = _format_tool_result_summary(last['result'])
-                        await self._stream_progress(query_id, "retrieved", f"工具执行完成，{summary}", 50, tool_name=last_tool_name)
+                            # 将工具结果添加回消息
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": json.dumps(result, ensure_ascii=False, default=str)
+                            })
+                            tool_calls_executed.append({
+                                "name": tn,
+                                "args": ta,
+                                "result": result,
+                                "result_count": _count_tool_result(result),
+                            })
 
-                    # 继续对话，让 LLM 生成最终回复
+                            summary = _format_tool_result_summary(result)
+                            await self._stream_progress(query_id, "retrieved", f"工具执行完成，{summary}", 50, tool_name=tn)
+
+                    # 所有工俱全部完成 → 让 LLM 思考下一步
+                    # （不额外发 SSE，工具结果已经在 retrieved 事件中显示）
                     continue
 
                 elif finish_reason == "stop" or finish_reason == "completed":
@@ -531,45 +680,81 @@ class Orchestrator:
                 slang_term=tool_args.get("slang_term", ""),
                 limit=tool_args.get("limit", 20)
             )
+        elif tool_name == "aggregate_clue_stats":
+            return await self._aggregate_clue_stats(
+                time_range=tool_args.get("time_range", "today"),
+                group_by=tool_args.get("group_by", "risk_platform"),
+                risk_types=tool_args.get("risk_types"),
+                platforms=tool_args.get("platforms"),
+            )
+        elif tool_name == "get_actor_footprint":
+            return await self._get_actor_footprint(
+                entity_value=tool_args.get("entity_value", ""),
+                entity_type=tool_args.get("entity_type"),
+                limit=tool_args.get("limit", 50)
+            )
         else:
             return {"error": f"Unknown tool: {tool_name}"}
 
     async def _search_clues(
         self,
         query: str = "",
-        time_range: str = None,
+        time_range: dict = None,
         risk_types: list = None,
         platforms: list = None,
         limit: int = 50
     ) -> list[dict]:
         """搜索线索的工具实现"""
-        from utils import parse_time_range, parse_platform, parse_risk_type
+        from utils import parse_platform, parse_risk_type
 
-        params = {
-            "limit": limit
-        }
+        where_clauses = []
+        params: dict = {}
 
-        # 解析 time_range
+        # query: keyword search against clue text
+        if query and query.strip():
+            where_clauses.append(
+                "(raw_text ILIKE %(query_pat)s OR cleaned_text ILIKE %(query_pat)s)"
+            )
+            params["query_pat"] = f"%{query.strip()}%"
+
+        # time_range: structured {amount, unit} dict from LLM
         if time_range:
-            start_time, end_time = parse_time_range(time_range)
+            start_time, end_time = _parse_time_window(time_range)
             if start_time:
+                where_clauses.append("published_at >= %(start_time)s")
                 params["start_time"] = start_time
             if end_time:
+                where_clauses.append("published_at <= %(end_time)s")
                 params["end_time"] = end_time
 
-        # 解析 risk_types
+        # 解析 risk_types（支持多值，英文→DB 中文映射）
         if risk_types and isinstance(risk_types, list):
-            # 直接使用传入的风险类型
-            params["risk_label_level1"] = risk_types[0] if len(risk_types) == 1 else None
+            _risk_type_map = {
+                "account_trading": "账号交易",
+                "fraud_leads": "诈骗引流",
+                "traffic_cheating": "流量作弊",
+                "black_tools": "黑产工具",
+                "money_laundering": "灰产洗钱",
+                "unknown": "未知/其他",
+                "irrelevant": "无关",
+            }
+            mapped_risks = []
+            for rt in risk_types:
+                mapped_risks.append(_risk_type_map.get(rt, rt))
+            mapped_risks = [r for r in mapped_risks if r]
+            if mapped_risks:
+                where_clauses.append("risk_label_level1 = ANY(%(risk_types)s)")
+                params["risk_types"] = mapped_risks
 
-        # 解析 platforms
+        # 解析 platforms（支持多值，做中文→DB 名映射）
         if platforms and isinstance(platforms, list):
-            # 映射中文平台名到数据库值
             platform_map = {
                 "抖音": "douyin",
                 "贴吧": "baidu_tieba",
+                "微博": "weibo",
+                "小红书": "xiaohongshu",
+                "快手": "kuaishou",
                 "Telegram": "telegram",
-                "论坛": "forum"
             }
             mapped = []
             for p in platforms:
@@ -578,31 +763,23 @@ class Orchestrator:
                 else:
                     mapped.append(p)
             if mapped:
-                params["source_channel"] = mapped[0] if len(mapped) == 1 else None
+                where_clauses.append("source_channel = ANY(%(platforms)s)")
+                params["platforms"] = mapped
 
-        # 执行查询
+        # 默认排除 e2e 测试数据
+        where_clauses.append("source_channel IS NOT NULL AND source_channel != '' AND source_channel != 'e2e'")
+
+        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+        params["limit"] = limit
+
+        # Debug: log what the LLM sent and the generated SQL
+        logger.debug(
+            f"[search_clues] LLM sent: query={query!r} time_range={time_range!r} "
+            f"risk_types={risk_types!r} platforms={platforms!r}"
+        )
+        logger.debug(f"[search_clues] SQL: WHERE {where_sql} | params={ {k:v for k,v in params.items() if k != 'query_pat'} }")
+
         with self.db._get_cursor() as cur:
-            where_clauses = ["1=1"]
-            values = []
-
-            if params.get("risk_label_level1"):
-                where_clauses.append("risk_label_level1 = %s")
-                values.append(params["risk_label_level1"])
-
-            if params.get("source_channel"):
-                where_clauses.append("source_channel = %s")
-                values.append(params["source_channel"])
-
-            if params.get("start_time"):
-                where_clauses.append("published_at >= %s")
-                values.append(params["start_time"])
-
-            if params.get("end_time"):
-                where_clauses.append("published_at <= %s")
-                values.append(params["end_time"])
-
-            where_sql = " AND ".join(where_clauses)
-
             cur.execute(f"""
                 SELECT clue_id, risk_label_level1, risk_label_level2, confidence,
                        raw_text, cleaned_text, source_channel, published_at,
@@ -610,8 +787,8 @@ class Orchestrator:
                 FROM antiblack.clues
                 WHERE {where_sql}
                 ORDER BY published_at DESC
-                LIMIT %s
-            """, values + [params.get("limit", limit)])
+                LIMIT %(limit)s
+            """, params)
 
             rows = cur.fetchall()
             result = [dict(row) for row in rows]
@@ -780,6 +957,226 @@ class Orchestrator:
             rows = cur.fetchall()
 
         return [dict(r) for r in rows]
+
+    async def _aggregate_clue_stats(
+        self,
+        time_range: dict = None,
+        group_by: str = "risk_platform",
+        risk_types: list = None,
+        platforms: list = None,
+    ) -> dict:
+        """线索聚合统计工具实现。
+
+        将计算下推给 DB（SQL GROUP BY），避免 LLM 从 search_clues 抽样来推算趋势。
+        支持 110K+ 条历史数据的多维度聚合。
+        time_range: structured {amount, unit} dict from LLM.
+        """
+        group_dimensions = {
+            "risk_type": ["risk_label_level1"],
+            "platform": ["source_channel"],
+            "channel": ["source_channel"],        # alias for platform
+            "risk_platform": ["risk_label_level1", "source_channel"],
+        }
+        group_cols = group_dimensions.get(group_by, group_dimensions["risk_platform"])
+        group_sql = ", ".join(group_cols)
+
+        conditions = []
+        params = {}
+
+        # Exclude e2e test data
+        conditions.append("source_channel IS NOT NULL AND source_channel != '' AND source_channel != 'e2e'")
+
+        if time_range:
+            start_time, end_time = _parse_time_window(time_range)
+            if start_time:
+                conditions.append("created_at >= %(start_time)s")
+                params["start_time"] = start_time
+            if end_time:
+                conditions.append("created_at <= %(end_time)s")
+                params["end_time"] = end_time
+
+        if risk_types and isinstance(risk_types, list):
+            _risk_type_map = {
+                "account_trading": "账号交易",
+                "fraud_leads": "诈骗引流",
+                "traffic_cheating": "流量作弊",
+                "black_tools": "黑产工具",
+                "money_laundering": "灰产洗钱",
+                "unknown": "未知/其他",
+                "irrelevant": "无关",
+            }
+            mapped_risks = []
+            for rt in risk_types:
+                mapped_risks.append(_risk_type_map.get(rt, rt))
+            mapped_risks = [r for r in mapped_risks if r]
+            if mapped_risks:
+                conditions.append("risk_label_level1 = ANY(%(risk_types)s)")
+                params["risk_types"] = mapped_risks
+
+        if platforms and isinstance(platforms, list):
+            conditions.append("source_channel = ANY(%(platforms)s)")
+            params["platforms"] = platforms
+
+        where_clause = " AND ".join(conditions)
+
+        with self.db._get_cursor() as cur:
+            cur.execute(f"""
+                SELECT {group_sql}, COUNT(*) AS cnt
+                FROM antiblack.clues
+                WHERE {where_clause}
+                GROUP BY {group_sql}
+                ORDER BY cnt DESC
+            """, params)
+            rows = cur.fetchall()
+
+        # Build structured response for distinct dimensions
+        distributions = {}
+        for col in group_cols:
+            dist = {}
+            for row in rows:
+                val = row.get(col)
+                if val:
+                    dist[val] = dist.get(val, 0) + row["cnt"]
+            distributions[col] = {"items": dist, "total": sum(dist.values())}
+
+        return {
+            "data": distributions,
+            "group_by": group_by,
+            "total_clues": sum(r["cnt"] for r in rows),
+            "time_range": time_range,
+        }
+
+    async def _get_actor_footprint(
+        self,
+        entity_value: str = "",
+        entity_type: str = None,
+        limit: int = 50
+    ) -> dict:
+        """实体活动轨迹时间线工具实现。
+
+        跨 clues + entities 表聚合，返回该实体的完整活动画像：
+        - 活动时间线（按日/按渠道分组）
+        - 风险标签变化
+        - 关联线索摘要
+        """
+        if not entity_value:
+            return {"error": "entity_value is required"}
+
+        from datetime import datetime
+
+        result = {
+            "entity_value": entity_value,
+            "entity_type": entity_type or "auto",
+            "timeline": [],
+            "risk_history": {},
+            "channel_activity": {},
+            "recent_clues": [],
+            "summary": {},
+        }
+
+        # 1. Active timeline: clues by this actor, grouped by date + channel
+        with self.db._get_cursor() as cur:
+            cur.execute("""
+                SELECT DATE(published_at) AS activity_date,
+                       source_channel,
+                       risk_label_level1,
+                       COUNT(*) AS cnt
+                FROM antiblack.clues
+                WHERE source_author_id = %(entity_value)s
+                   OR source_author_id ILIKE %(like_val)s
+                GROUP BY activity_date, source_channel, risk_label_level1
+                ORDER BY activity_date DESC
+                LIMIT 200
+            """, {"entity_value": entity_value, "like_val": f"%{entity_value}%"})
+            timeline_rows = cur.fetchall()
+
+        # Group by date + channel
+        daily = {}
+        channel_set = set()
+        for row in timeline_rows:
+            day = str(row["activity_date"]) if row["activity_date"] else "unknown"
+            ch = row["source_channel"] or "unknown"
+            risk = row["risk_label_level1"] or "unknown"
+            cnt = row["cnt"]
+            channel_set.add(ch)
+
+            key = f"{day}|{ch}"
+            if key not in daily:
+                daily[key] = {"date": day, "channel": ch, "total": 0, "risk_labels": {}}
+            daily[key]["total"] += cnt
+            daily[key]["risk_labels"][risk] = daily[key]["risk_labels"].get(risk, 0) + cnt
+
+        result["timeline"] = sorted(daily.values(), key=lambda x: x["date"], reverse=True)[:90]
+        result["channel_activity"] = {ch: len([t for t in result["timeline"] if t["channel"] == ch]) for ch in sorted(channel_set)}
+
+        # 2. Risk distribution across all clues for this actor
+        with self.db._get_cursor() as cur:
+            cur.execute("""
+                SELECT risk_label_level1, COUNT(*) AS cnt
+                FROM antiblack.clues
+                WHERE source_author_id = %(entity_value)s
+                   OR source_author_id ILIKE %(like_val)s
+                GROUP BY risk_label_level1
+                ORDER BY cnt DESC
+            """, {"entity_value": entity_value, "like_val": f"%{entity_value}%"})
+            result["risk_history"] = [dict(r) for r in cur.fetchall()]
+
+        # 3. Recent clues (top N)
+        with self.db._get_cursor() as cur:
+            cur.execute("""
+                SELECT clue_id, risk_label_level1, risk_label_level2,
+                       raw_text, source_channel, published_at
+                FROM antiblack.clues
+                WHERE source_author_id = %(entity_value)s
+                   OR source_author_id ILIKE %(like_val)s
+                ORDER BY published_at DESC NULLS LAST
+                LIMIT %(limit)s
+            """, {"entity_value": entity_value, "like_val": f"%{entity_value}%", "limit": limit})
+            rows = cur.fetchall()
+            result["recent_clues"] = [dict(r) for r in rows]
+
+        # 4. Entity record from entities table
+        with self.db._get_cursor() as cur:
+            entity_where = ["raw_value ILIKE %(like_val)s OR entity_name ILIKE %(like_val)s"]
+            entity_params: dict = {"like_val": f"%{entity_value}%"}
+            if entity_type:
+                entity_where.append("entity_type = %(entity_type)s")
+                entity_params["entity_type"] = entity_type
+            cur.execute(f"""
+                SELECT raw_value, entity_type, first_seen, last_seen,
+                       occurrence_count, source_channel
+                FROM antiblack.entities
+                WHERE {" AND ".join(entity_where)}
+                ORDER BY occurrence_count DESC NULLS LAST
+                LIMIT 10
+            """, entity_params)
+            entity_rows = cur.fetchall()
+
+        result["entity_records"] = [dict(r) for r in entity_rows]
+
+        # 5. Summary
+        total_clues = sum(r["cnt"] for r in result.get("risk_history", []))
+        first_date = result["timeline"][-1]["date"] if result["timeline"] else None
+        last_date = result["timeline"][0]["date"] if result["timeline"] else None
+        result["summary"] = {
+            "total_clues_found": total_clues,
+            "first_active": first_date,
+            "last_active": last_date,
+            "channels": list(sorted(channel_set)),
+            "entity_records_found": len(entity_rows),
+        }
+
+        # Datetime serialization
+        def _handle_dt(obj):
+            if hasattr(obj, "isoformat"):
+                return obj.isoformat()
+            elif isinstance(obj, dict):
+                return {k: _handle_dt(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_handle_dt(i) for i in obj]
+            return obj
+
+        return _handle_dt(result)
 
     async def _search_slang(
         self,
