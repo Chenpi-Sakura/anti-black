@@ -18,6 +18,49 @@ from config import get_config
 logger = logging.getLogger(__name__)
 
 
+# 中文同义词字典 — 当 LLM 发出某个关键词时，自动展开为所有同义变体，
+# 大幅提升召回率（避免 LLM 选词不精准导致的 0 结果）。
+# 字典 key 是常见"主词"，value 是 clue raw_text 里实际出现的同义写法。
+# 数据来源：diagnose_search_clues.py 实证（7d fraud_leads 数据集）。
+SYNONYM_DICT: dict[str, list[str]] = {
+    "微信号":  ["微信号", "微信", "卫星", "加微", "vx", "V信", "薇信"],
+    "微信":    ["微信", "微信号", "卫星", "加微", "vx", "V信"],
+    "手机":    ["手机", "电话", "联系方式", "手机号"],
+    "诈骗":    ["诈骗", "杀猪盘", "刷单", "兼职", "引流"],
+    "刷量":    ["刷量", "刷粉", "刷赞", "刷评", "涨粉", "刷播放"],
+    "账号交易": ["账号交易", "卖号", "出号", "租号", "账号买卖", "换绑"],
+    "黑产工具": ["黑产工具", "接码", "群控", "脚本"],
+}
+
+
+def _expand_query_synonyms(tokens: list[str]) -> list[str]:
+    """对每个 token 在 SYNONYM_DICT 里查找同义词，union 去重后返回展开列表。
+
+    - 匹配方式：token == key 或 token in value → 用 key 对应的 value 展开
+    - 不在字典里的 token 原样保留
+    - 去重保序，避免重复 pattern 撑大 SQL 数组
+    """
+    seen: set[str] = set()
+    expanded: list[str] = []
+    for t in tokens:
+        variants: list[str] = []
+        if t in SYNONYM_DICT:
+            variants = SYNONYM_DICT[t]
+        else:
+            # 反向匹配：token 是某字典项 value 里的同义写法
+            for key, values in SYNONYM_DICT.items():
+                if t in values:
+                    variants = values
+                    break
+        if not variants:
+            variants = [t]
+        for v in variants:
+            if v not in seen:
+                seen.add(v)
+                expanded.append(v)
+    return expanded
+
+
 # 工具定义 — 三层工作流：search → drill → aggregate
 # Each tool description is written for the LLM, not for humans.
 # Descriptions are imperative: when to call, what it returns, edge cases.
@@ -724,6 +767,7 @@ class Orchestrator:
         MAX_QUERY_TOKENS = 8
         if query and query.strip():
             tokens = query.split()[:MAX_QUERY_TOKENS]
+            tokens = _expand_query_synonyms(tokens)[:MAX_QUERY_TOKENS]
             patterns = [f"%{t}%" for t in tokens]
             where_clauses.append(
                 "(raw_text ILIKE ANY(%(query_pats)s) OR cleaned_text ILIKE ANY(%(query_pats)s))"
