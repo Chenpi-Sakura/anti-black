@@ -14,6 +14,15 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+# Absolute model directory — resolved once at import time so the retrain
+# output lands in the right place regardless of CWD (e.g. someone running
+# from scripts/ or any other directory).
+_MODEL_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'models', 'ml', 'assets',
+)
+# Also used by _load_embedding_model / _classify_by_rules etc.
+
 
 # --- Layer 3: PacingSemaphore (rate-limited concurrency) ---
 class _PacingSemaphore:
@@ -360,15 +369,15 @@ class Classifier:
         import joblib
 
         # Find latest classifier model
-        models_dir = './models/ml/assets'
+        models_dir = _MODEL_DIR
         if not os.path.exists(models_dir):
             return
 
         pkl_files = [f for f in os.listdir(models_dir) if f.startswith('classifier_v') and f.endswith('.pkl')]
         if not pkl_files:
             # Fallback to xgboost models
-            xgb_clf = './models/ml/assets/xgboost_classifier.pkl'
-            xgb_le = './models/ml/assets/xgboost_classifier_label_encoder.pkl'
+            xgb_clf = os.path.join(_MODEL_DIR, 'xgboost_classifier.pkl')
+            xgb_le = os.path.join(_MODEL_DIR, 'xgboost_classifier_label_encoder.pkl')
             if os.path.exists(xgb_clf) and os.path.exists(xgb_le):
                 try:
                     self._embedding_clf = joblib.load(xgb_clf)
@@ -990,8 +999,8 @@ class Classifier:
 
             # 6. Save and hot swap
             version = datetime.now().strftime('%Y%m%d_%H%M%S')
-            model_path = f"./models/ml/assets/classifier_v{version}.pkl"
-            os.makedirs('./models/ml/assets', exist_ok=True)
+            model_path = os.path.join(_MODEL_DIR, f"classifier_v{version}.pkl")
+            os.makedirs(_MODEL_DIR, exist_ok=True)
 
             joblib.dump({
                 'model': clf,
