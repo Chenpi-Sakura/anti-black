@@ -16,23 +16,28 @@ class OllamaClient:
 
     def __init__(
         self,
-        base_url: str = "http://localhost:11434",
-        vlm_model: str = "qwen2-vl:2b",
-        embedding_model: str = "nomic-embed-text",
+        base_url: Optional[str] = None,
+        vlm_model: Optional[str] = None,
+        embedding_model: Optional[str] = None,
         timeout: int = 120
     ):
         """
         Initialize Ollama client.
 
+        All model / URL values fall back to env (OLLAMA_BASE_URL /
+        OLLAMA_VLM_MODEL / OLLAMA_LLM_MODEL / OLLAMA_EMBEDDING_MODEL) and
+        finally to a placeholder default so the client can be constructed
+        even without configuration.
+
         Args:
-            base_url: Ollama server URL
-            vlm_model: VLM model name for image understanding
-            embedding_model: Embedding model name
+            base_url: Ollama server URL (default: $OLLAMA_BASE_URL or localhost:11434)
+            vlm_model: VLM model name (default: $OLLAMA_VLM_MODEL or qwen2-vl:2b)
+            embedding_model: Embedding model name (default: $OLLAMA_EMBEDDING_MODEL or nomic-embed-text)
             timeout: Request timeout in seconds
         """
-        self.base_url = base_url.rstrip("/")
-        self.vlm_model = vlm_model
-        self.embedding_model = embedding_model
+        self.base_url = (base_url or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")).rstrip("/")
+        self.vlm_model = vlm_model or os.environ.get("OLLAMA_VLM_MODEL", "qwen2-vl:2b")
+        self.embedding_model = embedding_model or os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
         self.timeout = timeout
 
     def is_available(self) -> bool:

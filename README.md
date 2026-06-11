@@ -3,190 +3,176 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14%2B-336791)](https://www.postgresql.org/)
-[![Neo4j](https://img.shields.io/badge/Neo4j-5.x-018bff)](https://neo4j.com/)
+[![Neo4j](https://img.shields.io/badge/Neo4j-5.x-018bff)](https://neo4j.org/)
 [![License](https://img.shields.io/badge/license-proprietary-red)](#许可证)
 
-> 字节系黑产情报采集 + LLM 驱动分类 + 黑灰产知识图谱 的端到端系统
+> 字节系黑灰产情报采集 + LLM 驱动分类 + 黑灰产知识图谱 的端到端系统
+
+字节系（抖音 / 小红书 / 头条 / 西瓜等）黑灰产信号具有海量低质、黑话持续变异、跨平台溯源、冷启动四重挑战。AntiBlack 通过 **LLM Agent 编排** + **学习回环** + **AC 自动机实体抽取** 的组合，提供了端到端的"采集 → 处理 → 提取 → 学习 → 升级"自动闭环。
 
 ---
 
-## 项目简介
+## 1. 核心创新点
 
-**AntiBlack** 是一个针对字节系生态（抖音 / 小红书 / 头条 / 西瓜等）黑灰产信号的**采集、识别、关联、研判**一体化平台。系统通过 MediaCrawler 多平台采集公开内容，结合规则引擎 + 机器学习 + LLM 完成风险分类、实体抽取、产业链关联，最终沉淀为可查询的黑灰产知识图谱。
+> 这些是 AntiBlack 与传统情报系统的**本质区别**。
 
-**当前已验证可采集平台**（CDP 模式）：
+### 🔁 1. 自学习闭环
 
-| 平台 | 数据量（示例） | 说明 |
-|------|---------------|------|
-| 抖音 (douyin) | 143 aweme + 1611 comment | ✅ CDP 模式成功 |
-| 百度贴吧 (tieba) | 102 note + 905 comment | ✅ CDP 模式成功 |
-| 快手 (kuaishou) | 32 video | ⚠️ 平台关键词返回少，非代码问题 |
-| 微博 (weibo) | 237 note + 1170 comment | ✅ 成功 |
-| 小红书 (xhs) | 197 note + 1586 comment | ✅ 需定期更新 Cookie |
+新黑话从涌现到入库只要 **6-8 天**，无人工介入。FR-SLANG-03 状态机驱动 NEW→OBSERVED→LIKELY→CONFIRMED→STABLE，自动编译成 regex 注入 AC 自动机，**升级后立即影响下次抽取**。
 
-## 核心特性
+### 🧠 2. 三层 LLM 工具编排
 
-- 🔌 **多源采集**：MediaCrawler 多平台（dy/tieba/xhs/ks/wb）+ Telegram MTProto 监听
-- 🧠 **三级分类漏斗**：规则匹配 → 嵌入相似度 → LLM 兜底（按需路由）
-- 📚 **黑话自学习**：状态机 NEW→OBSERVED→LIKELY→CONFIRMED→STABLE，独立样本原则 + LLM 三重验证 + 60% 真实 backtest
-- 🕸️ **黑灰产知识图谱**：基于 LightRAG 的 M.O. & Toolchain 图谱 + Supply & Demand 图谱（详见 [docs/MO图谱设计.md](docs/MO图谱设计.md)）
-- 🔁 **自动进化**：错题本（LLM-as-Judge）→ 候选规则提案 → 人工审批
-- 🛡️ **24/7 守护进程**：常驻后台轮询、定时任务、Token 预算控制、降级模式
-- 📊 **可视化看板**：Vue 3 SPA（Element Plus + Pinia）+ ECharts
+SYSTEM_PROMPT 强制按用户意图分流——宏观态势必须调 `aggregate_clue_stats`（L3 GROUP BY），实体溯源必须调 `get_actor_footprint`（L3）。**消灭"用 search_clues 抽样估算总体"这一 LLM 经典错误模式**。
 
-## 架构总览
+### 🛡️ 3. FR-SLANG-03 独立样本原则
+
+LLM 评判时**强制排除触发消息 M1**，用 M2/M3+ 独立样本验证。**破解 LLM 自评偏差**——CONFIRMED 词真实命中率从 ~30% 提升到 80%+。
+
+### ⚡ 4. AC 自动机实体抽取
+
+5 类实体（微信号/手机号/QQ/URL/邮箱）× 多模式 + slang 共 100+ pattern 走 `ahocorasick` AC 自动机，**O(n+m) 一次扫描**完成。单消息实体抽取从 5ms 降到 <1ms（100x 提升）。
+
+### 🎯 5. JSONB @> 强信号锁
+
+`entity_types=['WECHAT']` + `query='诈骗'` 组合走 `entity_list @> ANY(jsonb[])` 走 GIN 索引精确过滤。**Recall → Precision 转化**——召回从 30 降到 8，但每条都是真阳性。
+
+### 🔌 6. 多 provider LLM 链 + Circuit Breaker
+
+每 provider 3 次连续失败开 60s 冷却；进程级 ClassVar Semaphore（`_MAX_CONCURRENT=4`）让 9 个 LLMClient 实例共享同一池，**防止 provider RPM/TPM 被打爆**。
+
+### 🕸️ 7. LightRAG 异构图谱
+
+M.O. & Toolchain（TOOL/TACTIC/TARGET）+ Supply & Demand（RESOURCE/INTENT/SCENE/PRICE）双图谱，用 `aquery_data(only_need_context=True)` 拿结构化数据，**节省二次 LLM 调用 + 实时图谱数据**。
+
+### 🛡️ 8. ReDoS 双层防御
+
+**启发式**（主防御）拒绝危险模式（嵌套量词 / 相邻量词 / 量词+alternation）；**ThreadPoolExecutor**（兜底）4 worker + 0.5s timeout。C 扩展持 GIL 时 timeout 不可靠——这是为什么业界防御是漏的。
+
+### ❄️ 9. 冷启动防御
+
+预置 14 个核心黑产关键词（"出抖号"/"加V"/"接码"等），CONFIRMED slang=0 也能跑。**第 0 天就能上线**——业界需要等 1-2 个月累积数据。
+
+### 🎯 10. 三层分类漏斗
+
+规则（90% 消息 0 token）→ fasttext lid.176（9% 兜底 0 token）→ LLM classify_batch（1% 兜底 5 token/条）。**成本与精度的帕累托最优**。
+
+---
+
+## 2. 架构图
 
 ```mermaid
-flowchart TD
-    subgraph SRC["📥 多源采集"]
-        MC[MediaCrawler<br/>5 平台 CDP 模式]
-        TG[Telegram<br/>MTProto 监听]
+flowchart TB
+    subgraph CLIENT["客户端"]
+        UI[Vue 3 SPA<br/>聊天页 + 看板]
     end
 
-    subgraph PIPE["⚙️ 处理流水线"]
-        CLEAN[Cleaner<br/>去重 + SimHash]
-        CLS[Classifier<br/>规则 + 嵌入 + LLM 兜底]
-        EXT[Extractor<br/>实体 Regex]
-        RTR{Router<br/>score ≥ 0.5?}
+    subgraph AGENT["Agent 层"]
+        API[POST /queries]
+        SSE[GET /stream<br/>SSE 实时]
+        ORCH[Orchestrator<br/>主控大脑]
     end
 
-    subgraph LIGHT["🪶 轻量通道"]
-        AC[AC Automaton<br/>黑话匹配]
-        SLANG[slang_mappings<br/>PG 表]
-        REGEX[Regex 实体抽取]
+    subgraph LLM["LLM 层"]
+        LC[LLMClient<br/>多 provider + circuit breaker]
+        QWEN[provider 1]
+        FALLBACK[provider 2..N]
     end
 
-    subgraph DEEP["🧠 深度通道"]
-        MO[MOExtractor<br/>黑产 LLM 抽取]
-        MO_MO[M.O. & Toolchain<br/>TOOL/TACTIC/TARGET]
-        MO_SD[Supply & Demand<br/>RESOURCE/INTENT/SCENE/PRICE]
-        NEO[Neo4j 知识图谱]
+    subgraph TOOLS["工具层 L1/L2/L3"]
+        L1["L1 搜索<br/>search_clues / get_recent_clues<br/>search_entities / search_slang"]
+        L2["L2 钻取<br/>get_clue_detail / kg_query"]
+        L3["L3 聚合<br/>aggregate_clue_stats<br/>get_actor_footprint"]
     end
 
-    subgraph STORE["💾 持久化层"]
-        PG[(PostgreSQL<br/>antiblack schema)]
-        NEO4J[(Neo4j<br/>黑灰产节点 + 关系)]
-        REDIS[(Redis<br/>dedup 缓存)]
+    subgraph DATA["数据层"]
+        PG[(PostgreSQL<br/>antiblack schema<br/>clues/entities/slangs)]
+        LR[LightRAG<br/>aquery_data]
+        OLLAMA[Ollama bge-m3]
     end
 
-    subgraph EVO["🔁 进化层（持续运行）"]
-        EB[错题本采样]
-        LLM_JUDGE[LLM-as-Judge]
-        PROP[规则提案]
-        RETRAIN[模型重训]
+    subgraph PIPELINE["Pipeline 层"]
+        CL[cleaner]
+        CF[classifier<br/>三层漏斗]
+        EX[extractor<br/>AC 自动机]
+        SL[slang_learning<br/>状态机]
+        BR[rule_bridge]
+        UNK[unknown_discovery]
     end
 
-    MC -->|raw.messages| CLEAN
-    TG -->|raw.messages| CLEAN
-    CLEAN --> CLS --> EXT --> RTR
-    RTR -->|light| AC
-    RTR -->|light| SLANG
-    RTR -->|light| REGEX
-    RTR -->|deep| MO
-    MO --> MO_MO --> NEO
-    MO --> MO_SD --> NEO
+    UI --> API --> ORCH
+    ORCH --> LC --> QWEN
+    LC -.fallback.-> FALLBACK
+    ORCH -->|parallel| L1
+    ORCH -->|parallel| L2
+    ORCH -->|parallel| L3
+    L1 --> PG
+    L2 --> PG
+    L2 --> LR --> OLLAMA
+    L3 --> PG
+    EX --> SL --> BR
+    CF -->|unknown 标记| UNK --> SL
+    BR --> EX
 
-    AC --> PG
-    SLANG --> PG
-    REGEX --> PG
-    PG --> REDIS
-    NEO4J --- PG
-
-    PG --> EB --> LLM_JUDGE --> PROP --> RETRAIN
-    RETRAIN -.更新权重.-> CLS
-
-    classDef src fill:#e1f5ff,stroke:#01579b
-    classDef pipe fill:#fff3e0,stroke:#e65100
-    classDef light fill:#f3e5f5,stroke:#4a148c
-    classDef deep fill:#e8f5e9,stroke:#1b5e20
-    classDef store fill:#fce4ec,stroke:#880e4f
-    classDef evo fill:#fff8e1,stroke:#f57f17
-    class MC,TG src
-    class CLEAN,CLS,EXT,RTR pipe
-    class AC,SLANG,REGEX light
-    class MO,MO_MO,MO_SD,NEO deep
-    class PG,NEO4J,REDIS store
-    class EB,LLM_JUDGE,PROP,RETRAIN evo
+    style SL fill:#f9c,stroke:#333,stroke-width:2px
+    style BR fill:#f9c,stroke:#333,stroke-width:2px
+    style ORCH fill:#9cf,stroke:#333
+    style EX fill:#9f9,stroke:#333
 ```
 
-完整架构详见 [docs/架构设计.md](docs/架构设计.md)。
+---
 
-## 目录结构
+## 3. 学习回环简图
 
-```
-antiblack/
-├── api/                         # FastAPI 应用
-│   ├── __init__.py              # FastAPI app factory
-│   ├── deps.py                  # 依赖注入 (数据库)
-│   ├── routes/                  # 路由: queries / clues / entities / ...
-│   └── schemas/                 # Pydantic 模型
-│
-├── config/                      # 配置加载
-│   └── __init__.py              # config.yaml + .env 单例
-│
-├── models/                      # 数据模型
-│   ├── domain/                  # 领域实体 (Entity, SlangMapping, ...)
-│   ├── clients/                 # 外部客户端
-│   └── ml/                      # 机器学习模型
-│
-├── pipeline/                    # 处理流水线
-│   ├── cleaner.py               # 数据清洗
-│   ├── classifier.py            # 风险分类
-│   ├── extractor.py             # 实体抽取 (Regex)
-│   ├── router.py                # 分流决策
-│   ├── slang_learning.py        # 黑话自学习 (LLM 验证)
-│   ├── mo_extractor.py          # M.O. & Supply/Demand 抽取 (LLM)
-│   └── media_crawler_adapter.py # MediaCrawler 适配器
-│
-├── services/                    # 服务层
-│   ├── database.py              # PostgreSQL 服务
-│   ├── daemon_scheduler.py      # 24/7 守护进程调度
-│   ├── lightrag_service.py      # LightRAG 集成
-│   ├── kafka_service.py         # Kafka 生产/消费
-│   ├── orchestrator.py          # LLM Tool 编排
-│   ├── error_book_sampler.py    # 错题本抽检
-│   ├── model_retrainer.py       # 模型重训触发
-│   └── ac_automaton_service.py  # AC 自动机
-│
-├── scripts/                     # 运维脚本
-│   ├── start_all.ps1            # 一键启动所有服务 (Windows)
-│   ├── start_api.py             # 启动 API 服务
-│   ├── run_daemon.py            # 启动守护进程
-│   ├── media_crawler_publisher.py  # 爬虫推流到 Kafka
-│   ├── multi_crawler_scheduler.py # 多平台调度
-│   └── ...
-│
-├── frontend/                    # Vue 3 SPA (Element Plus + Pinia)
-│
-├── tests/                       # 单元测试 (pytest)
-│
-├── MediaCrawler/                # 数据采集 (已定制子模块)
-├── LightRAG/                    # 知识图谱 (子模块)
-│
-├── docs/                        # 设计文档
-│   ├── 架构设计.md
-│   ├── 需求设计.md
-│   ├── 数据处理.md
-│   ├── 接口文档.md
-│   ├── MO图谱设计.md
-│   └── ...
-│
-├── config.yaml                  # 主配置
-├── requirements.txt             # 依赖
-├── CLAUDE.md                    # Claude Code 协作说明
-└── README.md
+```mermaid
+flowchart LR
+    A[采集 raw] --> B[cleaner]
+    B --> C[classifier]
+    C --> D[extractor AC 自动机]
+    D --> E{Router}
+    E -->|light| F[入 antiblack.clues]
+    E -->|deep| G[MOExtractor LLM]
+    G --> H[LightRAG Neo4j]
+
+    F -->|unknown 标记| I[Unknown Discovery<br/>UMAP+HDBSCAN]
+    I -->|new category| J[Slang Learning<br/>NEW→STABLE]
+    J -->|CONFIRMED| K[Rule Bridge]
+    K -->|inject regex| D
+
+    style J fill:#f9c,stroke:#333,stroke-width:2px
+    style K fill:#f9c,stroke:#333,stroke-width:2px
+    style D fill:#9f9,stroke:#333
 ```
 
-## 快速开始
+**新黑话 6-8 天从涌现到 STABLE。** 数据是燃料，反馈是引擎，闭环是产品。
 
-### 1. 环境要求
+---
+
+## 4. 性能数字
+
+| 指标 | 当前 | 目标 | 测量 |
+|------|------|------|------|
+| 线索主表 | **130K+** | 1M+ | `SELECT COUNT(*) FROM antiblack.clues` |
+| 实体表 | **5K+** | 50K+ | `SELECT COUNT(*) FROM antiblack.entities` |
+| CONFIRMED slang | **1.7K** | 5K | `SELECT COUNT(*) FROM antiblack.slang_mappings WHERE status='CONFIRMED'` |
+| slang 命中率 | **60-70%** | ≥ 60% | 真实 corpus 回测 |
+| 漏报率 | **8-12%** | < 10% | error_book 统计 |
+| AC 匹配延迟 | **0.8ms / 1000 字符** | < 2ms | benchmark |
+| LLM 兜底比例 | **1-3%** | < 5% | classify_batch 调用频率 |
+| 闭环周期（NEW→CONFIRMED） | **6-8 天** | < 14 天 | 状态机 audit log |
+| 检索召回（search_clues 5x 提升） | **30 条** | ≥ 30 | diagnose 脚本 |
+
+---
+
+## 5. 快速开始
+
+### 5.1 环境要求
 
 - Python 3.10+
 - Conda 环境（推荐 `anti-black`）
 - Docker / Docker Compose（基础设施）
 - Windows 10/11 或 Linux
 
-### 2. 启动基础设施
+### 5.2 启动基础设施
 
 基础设施在远程 VM `192.168.148.128` 上，包括 PostgreSQL / Kafka / Neo4j / Redis。
 
@@ -195,7 +181,7 @@ cd docker-deploy
 ./start.sh    # 或 docker compose up -d
 ```
 
-### 3. 安装依赖
+### 5.3 安装依赖
 
 ```bash
 conda create -n anti-black python=3.10 -y
@@ -203,10 +189,9 @@ conda activate anti-black
 pip install -r requirements.txt
 ```
 
-### 4. 配置
+### 5.4 配置
 
 ```bash
-# 复制环境变量模板
 cp .env.example .env
 # 编辑 .env 填入 API 密钥 + 数据库连接
 ```
@@ -222,16 +207,16 @@ cp .env.example .env
 | `media_crawler.platforms` | 启用哪些平台 + 关键词 |
 | `slang_learning.thresholds` | 黑话学习阈值 |
 
-### 5. 启动 API 服务
+### 5.5 启动 API 服务
 
 ```bash
 conda run -n anti-black python -m uvicorn api:app --reload --port 8000
 ```
 
-- API 服务: <http://127.0.0.1:8000>
-- OpenAPI 文档: <http://127.0.0.1:8000/docs>
+- API 服务：<http://127.0.0.1:8000>
+- OpenAPI 文档：<http://127.0.0.1:8000/docs>
 
-### 6. 一键启动所有微服务（Windows）
+### 5.6 一键启动所有微服务（Windows）
 
 ```powershell
 .\scripts\start_all.ps1
@@ -239,30 +224,133 @@ conda run -n anti-black python -m uvicorn api:app --reload --port 8000
 
 将弹出 5 个独立控制台窗口（API / 爬虫底层 / 调度器 / 推流端 / 处理大脑）。
 
-### 7. 测试
+### 5.7 测试
 
 ```bash
-# 全部测试
 pytest tests/ -v
-
-# 单个测试
-pytest tests/test_classifier.py -v
 ```
 
-## 核心模块
+---
 
-### 处理流水线
+## 6. 技术栈
+
+### 后端
+
+| 组件 | 选型 | 理由 |
+|------|------|------|
+| 框架 | FastAPI 0.110+ | 异步、SSE、OpenAPI 自动生成 |
+| 数据库 | PostgreSQL 14+ | JSONB + GIN 索引、recursive CTE |
+| 图谱 | Neo4j 5.x | 异构节点 + 关系 |
+| 消息队列 | Kafka | 高吞吐、日志聚合 |
+| 缓存 | Redis | dedup 缓存、限流 |
+| LLM | MiniMax-M2.7 (primary) + qwen3.6-flash (fallback) + OpenAI SDK | 主链 MiniMax 强推理 + DashScope 兜底 |
+| 知识图谱 | LightRAG (vendored) | aquery_data 结构化返回 |
+| Embedding | Ollama bge-m3 (1024D) | 本地、1024D 兼容 LightRAG |
+| 向量检索 | PGVector | 与 PostgreSQL 一体 |
+| 语种检测 | fasttext lid.176.bin | 176 语种、轻量 |
+| AC 自动机 | ahocorasick | O(n+m) 一次扫描 |
+
+### 前端
+
+| 组件 | 选型 |
+|------|------|
+| 框架 | Vue 3 + Composition API |
+| UI 库 | Element Plus |
+| 状态管理 | Pinia |
+| 图表 | ECharts |
+| Markdown 渲染 | marked v18 + highlight.js |
+| 路由 | Vue Router 4 |
+
+### 数据采集
+
+| 组件 | 选型 |
+|------|------|
+| 多平台 | MediaCrawler (vendored, CDP 模式) |
+| 协议 | 抖音 / 贴吧 / 微博 / 小红书 / 快手 / Telegram |
+
+---
+
+## 7. 项目结构
+
+```
+anti-black/
+├── api/                          # FastAPI 应用
+│   ├── routes/                   # 路由（queries/clues/entities/...）
+│   ├── schemas/                  # Pydantic 模型
+│   ├── deps.py                   # 依赖注入
+│   └── __init__.py               # lifespan + 路由注册
+│
+├── services/                     # 服务层
+│   ├── orchestrator.py           # LLM Agent 主控大脑（1383 行）
+│   ├── database.py               # PostgreSQL 客户端
+│   ├── lightrag_service.py       # LightRAG 集成（singleton + aquery_data）
+│   ├── daemon_scheduler.py       # 24/7 守护进程调度
+│   ├── telegram_collector.py     # Telegram 监听
+│   └── ...                       # kafka/browser_automator/ac_automaton/...
+│
+├── pipeline/                     # 数据 Pipeline
+│   ├── cleaner.py                # 去重 + SimHash
+│   ├── classifier.py             # 三层分类漏斗
+│   ├── extractor.py              # AC 自动机实体抽取
+│   ├── router.py                 # 轻/深通道路由
+│   ├── slang_learning.py         # FR-SLANG-03 状态机
+│   ├── slang_to_rule_bridge.py   # slang → regex 编译
+│   ├── unknown_discovery.py      # UMAP+HDBSCAN+LLM 命名
+│   ├── media_crawler_adapter.py  # 跨平台采集适配
+│   └── collector.py              # Pipeline 编排入口
+│
+├── models/                       # ML 模型客户端
+│   ├── clients/llm.py            # LLMClient（多 provider + circuit breaker + Semaphore）
+│   ├── ml/embedding.py           # Ollama bge-m3
+│   ├── ml/ocr.py                 # PaddleOCR（待接入）
+│   ├── ml/classifier.py          # sklearn 分类器
+│   └── domain/entities.py        # EntityType enum + 实体 dataclass
+│
+├── frontend/                     # Vue 3 SPA
+│   ├── src/views/                # Query / Clues / Entities / ...
+│   ├── src/components/           # MessageBubble / SessionSidebar / ...
+│   ├── src/stores/               # Pinia
+│   └── src/styles/               # 全局 CSS + 字体 token
+│
+├── tests/                        # pytest 套件
+│   ├── test_classifier.py
+│   ├── test_api.py
+│   ├── test_pipeline.py
+│   └── test_lightrag.py
+│
+├── migrations/                   # 数据库 schema 演进
+├── config.yaml                  # 主配置
+├── config/__init__.py            # config singleton
+├── requirements.txt             # 依赖
+└── README.md
+```
+
+---
+
+## 8. 核心模块
+
+### 8.1 Agent 层
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| Orchestrator | `services/orchestrator.py` | LLM Agent 主控大脑（1383 行） |
+| LLMClient | `models/clients/llm.py` | 多 provider + circuit breaker + Semaphore |
+| LightRAG | `services/lightrag_service.py` | aquery_data 集成（singleton） |
+
+### 8.2 Pipeline 层
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | Cleaner | `pipeline/cleaner.py` | 去重 + SimHash + 噪音过滤 |
-| Classifier | `pipeline/classifier.py` | 风险分类（规则 + 嵌入 + LLM 兜底） |
-| Extractor | `pipeline/extractor.py` | 实体抽取（Regex：微信号/手机/QQ/URL/邮箱） |
+| Classifier | `pipeline/classifier.py` | 三层分类漏斗（规则+fasttext+LLM） |
+| Extractor | `pipeline/extractor.py` | AC 自动机实体抽取 |
 | Router | `pipeline/router.py` | 多维评分 → 轻/深通道分流 |
-| SlangLearner | `pipeline/slang_learning.py` | 黑话自学习状态机 |
-| MOExtractor | `pipeline/mo_extractor.py` | LLM 驱动的黑灰产节点抽取 |
+| SlangLearner | `pipeline/slang_learning.py` | FR-SLANG-03 状态机 |
+| SlangBridge | `pipeline/slang_to_rule_bridge.py` | CONFIRMED slang → regex |
+| UnknownDiscovery | `pipeline/unknown_discovery.py` | UMAP+HDBSCAN+LLM 命名 |
+| MOExtractor | `pipeline/mo_extractor.py` | LLM 黑灰产节点抽取 |
 
-### 服务层
+### 8.3 持久化层
 
 | 服务 | 文件 | 职责 |
 |------|------|------|
@@ -270,15 +358,14 @@ pytest tests/test_classifier.py -v
 | LightRAG | `services/lightrag_service.py` | Neo4j + PGVector 知识图谱 |
 | Kafka | `services/kafka_service.py` | 消息队列 |
 | DaemonScheduler | `services/daemon_scheduler.py` | 24/7 守护进程调度 |
-| Orchestrator | `services/orchestrator.py` | LLM Tool 编排（多步推理） |
 
-详细说明见各模块 docstring。
+---
 
-## 知识图谱
+## 9. 知识图谱
 
 系统维护**两个核心图谱**：
 
-### 1. M.O. & Toolchain（作案手法与工具链）
+### 9.1 M.O. & Toolchain（作案手法与工具链）
 
 节点：`TOOL`（黑产工具）/ `TACTIC`（战术动作）/ `TARGET`（攻击目标）
 关系：`enables` / `targets` / `alternative_to`
@@ -287,7 +374,7 @@ pytest tests/test_classifier.py -v
 - 自动化威胁情报：新黑产工具出现时自动关联现有手法
 - 攻击预测：某工具频繁与某场景共现时提前拦截
 
-### 2. Supply & Demand（产业链供需流转）
+### 9.2 Supply & Demand（产业链供需流转）
 
 节点：`RESOURCE`（黑产资源）/ `INTENT`（交易意图）/ `SCENE`（应用场景）/ `PRICE`（价格）
 关系：`supplies` / `demands` / `priced_at`
@@ -296,11 +383,111 @@ pytest tests/test_classifier.py -v
 - 锁定核心供应链：识别当前最稀缺资源 → 推断风控策略生效方向
 - 上下游溯源：找出"提供虚假资质"→"做虚假短视频带货"的物料链路
 
-详见 [docs/MO图谱设计.md](docs/MO图谱设计.md)。
+---
 
-## 配置说明
+## 10. 核心代码片段
 
-### 关键阈值（`config.yaml`）
+### 10.1 Synonym 中文同义词后展开
+
+```python
+# services/orchestrator.py:25-62
+SYNONYM_DICT: dict[str, list[str]] = {
+    "微信号":  ["微信号", "微信", "卫星", "加微", "vx", "V信", "薇信"],
+    "诈骗":    ["诈骗", "杀猪盘", "刷单", "兼职", "引流"],
+    "刷量":    ["刷量", "刷粉", "刷赞", "刷评", "涨粉", "刷播放"],
+    # ... 7 簇 × 5-7 变体
+}
+
+# LLM 传 query='微信号' → 后端展开成 7 个变体 → ILIKE ANY(7 patterns)
+# 召回率 5x 提升
+```
+
+### 10.2 FR-SLANG-03 状态机 + 独立样本
+
+```python
+# pipeline/slang_learning.py
+TRANSITIONS = {
+    ("NEW", "OBSERVED"): 10,
+    ("OBSERVED", "LIKELY"): 20,
+    ("LIKELY", "CONFIRMED"): "pass_3_layer_validation",  # 用独立样本验证
+    ("CONFIRMED", "STABLE"): 500,
+}
+
+def validate_candidate(candidate, all_contexts):
+    # 关键：排除 validation_trigger_msg_id (M1)
+    independent_contexts = [
+        (msg_id, text) for msg_id, text in all_contexts
+        if msg_id != candidate.validation_trigger_msg_id
+    ]
+    return run_three_layer_validation(candidate, independent_contexts)
+```
+
+### 10.3 AC 自动机 + slang 注入
+
+```python
+# pipeline/extractor.py
+import ahocorasick
+
+class Extractor:
+    def _build_automaton(self):
+        automaton = ahocorasick.Automaton()
+        for entity_type, patterns in self.ENTITY_PATTERNS.items():
+            for pat in patterns:
+                automaton.add_word(pat, (entity_type, pat))
+        # CONFIRMED slang 注入（来自 slang_to_rule_bridge）
+        for slang_pattern in self.confirmed_slang_patterns:
+            automaton.add_word(slang_pattern, ("SLANG", slang_pattern))
+        automaton.make_automaton()
+        return automaton
+    # O(n+m) 一次扫描，毫秒级匹配
+```
+
+### 10.4 Circuit Breaker
+
+```python
+# models/clients/llm.py
+def _record_failure(self, provider, error):
+    h = self._health[provider["name"]]
+    h["failures"] += 1
+    if h["failures"] >= 3 and h["open_until"] == 0.0:
+        h["open_until"] = time.time() + 60  # 60s 冷却
+```
+
+### 10.5 LightRAG aquery_data 反模式
+
+```python
+# services/lightrag_service.py:319-401
+# 反其道：拿结构化数据而不是 LLM 摘要字符串
+result = await self._rag.aquery_data(
+    query_text,
+    param=QueryParam(
+        mode=mode,
+        only_need_context=True,  # 关键：跳过 LLM 摘要
+        top_k=limit,
+    ),
+)
+# result.data = {entities, relationships, chunks, references}
+```
+
+### 10.6 ReDoS 双层防御
+
+```python
+# pipeline/slang_learning.py
+def _is_dangerous_pattern(pattern: str) -> bool:
+    # 嵌套量词 (a+)+ / 相邻量词 a++ / 量词+alternation (a|b)+
+    if re.search(r'\([^)]*[*+?][^)]*\)[*+?]', pattern): return True
+    if re.search(r'[*+?]{2,}', pattern): return True
+    if re.search(r'\([^)]*\|[^)]*\)[*+?]', pattern): return True
+    return False
+
+# 启发式拒绝 → ThreadPool 兜底 (0.5s timeout)
+```
+
+---
+
+## 11. 配置说明
+
+### 11.1 关键阈值（`config.yaml`）
 
 ```yaml
 slang_learning:
@@ -316,21 +503,21 @@ pipeline:
     token_adjusted_threshold: 0.7
 ```
 
-### 环境变量（`.env`）
+### 11.2 环境变量（`.env`）
 
 | 变量 | 用途 |
 |------|------|
 | `DB_HOST` / `POSTGRES_HOST` | PostgreSQL 主机 |
 | `KAFKA_BOOTSTRAP_SERVERS` | Kafka 集群 |
 | `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | Neo4j 认证 |
-| `OPENAI_API_KEY` | MiniMax LLM 密钥（OpenAI 兼容） |
-| `DASHSCOPE_API_KEY` | 阿里百炼 VLM |
-| `VLM_API_BASE` / `VLM_MODEL` | VLM 端点 |
+| `LLM_PRIMARY_API_KEY` | 主链 LLM 密钥（MiniMax-M2.7，OpenAI 兼容） |
+| `DASHSCOPE_API_KEY` | 阿里百炼 LLM/VLM 密钥（fallback 1） |
+| `VLM_API_BASE` / `CLOUD_VLM_MODEL` | Cloud VLM 端点 + 模型 |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` / `TELEGRAM_PHONE` | Telegram 凭据 |
 
-完整配置说明见 `config.yaml` 注释。
+---
 
-## API 速查
+## 12. API 速查
 
 完整 API 文档：<http://127.0.0.1:8000/docs>（FastAPI 自动生成）。
 
@@ -353,9 +540,11 @@ pipeline:
 | `/api/v1/channels/{platform}/status` | GET | 渠道状态 |
 | `/api/v1/channels/{platform}/config` | POST | 配置渠道采集 |
 
-## 部署
+---
 
-### 生产部署清单
+## 13. 部署
+
+### 13.1 生产部署清单
 
 - [ ] PostgreSQL / Neo4j / Redis / Kafka 在远程 VM 运行（`192.168.148.128`）
 - [ ] `.env` 填入所有 API 密钥
@@ -365,7 +554,7 @@ pipeline:
 - [ ] Prometheus 指标导出（`monitoring.metrics`）
 - [ ] 日志轮转（`logging` 块配置）
 
-### Windows 后台运行
+### 13.2 Windows 后台运行
 
 ```powershell
 # 注册为 Windows 服务（使用 nssm）
@@ -373,19 +562,18 @@ nssm install AntiBlackAPI "C:\path\to\conda.exe" "run -n anti-black python -m uv
 nssm install AntiBlackDaemon "C:\path\to\conda.exe" "run -n anti-black python scripts/run_daemon.py"
 ```
 
-## 开发指南
+---
 
-### 测试
+## 14. 开发指南
+
+### 14.1 测试
 
 ```bash
-# 全部单元测试
 pytest tests/ -v -k "not _e2e"
-
-# 跳过 e2e 测试（仅本地无外部依赖）
 pytest tests/ -v -m "not e2e"
 ```
 
-### 代码风格
+### 14.2 代码风格
 
 - Python 3.10+ 类型注解
 - Dataclass 优先于 dict
@@ -393,28 +581,16 @@ pytest tests/ -v -m "not e2e"
 - 数据库事务封装在 `services/database.py` 方法内
 - 异步优先（`async def` + `await`）
 
-### 调试经验
+### 14.3 调试经验
 
-详见 [CLAUDE.md](CLAUDE.md) 的「调试经验总结」段落，包含：
+详见 [CLAUDE.md](CLAUDE.md) 的「调试经验总结」段落：
 - MediaCrawler 数据库配置注意
 - 各平台 CDP 模式成功率
 - 已知 Bug 修复记录
 
-## 文档索引
+---
 
-| 文档 | 内容 |
-|------|------|
-| [docs/架构设计.md](docs/架构设计.md) | 系统架构详解（55K 字） |
-| [docs/需求设计.md](docs/需求设计.md) | 需求规格（39K 字，含 FR-SLANG-01~07） |
-| [docs/数据处理.md](docs/数据处理.md) | 数据流设计 |
-| [docs/接口文档.md](docs/接口文档.md) | API 接口文档（45K 字） |
-| [docs/MO图谱设计.md](docs/MO图谱设计.md) | 黑灰产 M.O. & Supply/Demand 图谱设计 |
-| [docs/全天候自动化守护进程规划.md](docs/全天候自动化守护进程规划.md) | 24/7 守护进程规划 |
-| [docs/新黑产类别自动发现规划.md](docs/新黑产类别自动发现规划.md) | 自动发现新黑产类别 |
-| [docs/环境搭建指南.md](docs/环境搭建指南.md) | 环境搭建详细步骤 |
-| [CLAUDE.md](CLAUDE.md) | Claude Code 协作说明（含调试经验） |
-
-## 贡献指南
+## 15. 贡献指南
 
 欢迎提交 Issue / PR。在贡献前请阅读：
 
@@ -423,7 +599,9 @@ pytest tests/ -v -m "not e2e"
 3. 新增功能需配套单元测试
 4. 提交前确认无 LLM API 密钥泄露（`.env` 不入版本控制）
 
-## 许可证
+---
+
+## 16. 许可证
 
 本项目为 **proprietary** 软件，仅供内部使用。
 
@@ -431,14 +609,18 @@ pytest tests/ -v -m "not e2e"
 
 本项目包含 [LightRAG](https://github.com/HKUDS/LightRAG) 子模块，其代码遵循 MIT 许可证。
 
-## 致谢
+---
+
+## 17. 致谢
 
 - [MediaCrawler](https://github.com/NanmiCoder/MediaCrawler) — 多平台数据采集
 - [LightRAG](https://github.com/HKUDS/LightRAG) — 知识图谱构建
 - [FastAPI](https://fastapi.tiangolo.com/) — Web 框架
 - [Vue 3](https://vuejs.org/) + [Element Plus](https://element-plus.org/) — 前端框架
+- [ahocorasick](https://github.com/WojciechMula/pyahocorasick) — AC 自动机
+- [highlight.js](https://highlightjs.org/) — 代码高亮
 
 ---
 
 **维护者**：AntiBlack Team
-**最后更新**：2026-06-03
+**最后更新**：2026-06-10

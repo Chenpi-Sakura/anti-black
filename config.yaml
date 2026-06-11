@@ -44,13 +44,13 @@ cloud_vlm:
   enabled: true
   api_base: "${VLM_API_BASE}"
   api_key: "${DASHSCOPE_API_KEY}"
-  model: "${VLM_MODEL}"  # qwen3.6-27b
+  model: "${CLOUD_VLM_MODEL}"  # default: qwen3.6-27b (set in .env)
 
 # Ollama Configuration (VLM and Embedding - 后续启用)
 ollama:
   enabled: false
   base_url: "http://localhost:11434"
-  vlm_model: "qwen3.6"  # Vision language model for image understanding
+  vlm_model: "${OLLAMA_VLM_MODEL}"  # default: qwen3.6 (set in .env)
   embedding_model: "bge-m3"  # Ollama embedding model
 
 # Local Models Configuration
@@ -80,16 +80,23 @@ local_models:
     device: "cpu"  # cpu, gpu
 
 # LightRAG Configuration (uses cloud LLM)
+#
+# NOTE (2026-06-11): the `llm` and `llm_backup` blocks below are
+# DEPRECATED. The LLMClient used by LightRAG
+# (services/lightrag_service.py:create_lightrag_llm_complete) reads
+# exclusively from env vars LLM_PRIMARY_* / LLM_FALLBACK_*_*, NOT
+# from this yaml block. Kept here for legacy reference only — do
+# NOT edit these to "change" the LightRAG LLM; edit the env chain.
 lightrag:
   working_dir: "./rag_storage"
-  # LLM Settings (MiniMax Primary)
+  # LLM Settings (MiniMax Primary) — DEPRECATED, see note above
   llm:
     api_base: "${LLM_API_BASE}"
     api_key: "${OPENAI_API_KEY}"
     model: "${LLM_MODEL}"
     max_tokens: 8192
     temperature: 0.0
-  # LLM Backup Settings (DashScope Qwen)
+  # LLM Backup Settings (DashScope Qwen) — DEPRECATED, see note above
   llm_backup:
     api_base: "${LLM_BACKUP_API_BASE}"
     api_key: "${DASHSCOPE_API_KEY}"
@@ -235,7 +242,11 @@ auto_evolution:
   # Error book (LLM-as-Judge)
   error_book:
     sample_rate: 0.01  # 1% of high-confidence messages
-    judge_model: "gpt-4o"
+    # Reserved slot for 异构 judge (Backlog-01). Currently unread by
+    # services/error_book_sampler.py — judge runs on the main chain
+    # LLMClient. When 异构 judge is implemented, point this at a
+    # different provider chain.
+    judge_model: "${ERROR_BOOK_JUDGE_MODEL}"  # default: gpt-4o (set in .env)
   # Retraining
   retrain:
     trigger_threshold: 2000

@@ -72,7 +72,7 @@ def create_lightrag_llm_complete():
     """Create LLM completion function (OpenAI-compatible) for LightRAG.
 
     Backward-compat factory used by LightRAG. Internally delegates to the
-    unified LLMClient (multi-provider fallback chain: doubao → qwen3.6-flash)
+    unified LLMClient (multi-provider fallback chain: MiniMax-M2.7 → qwen3.6-flash)
     so LightRAG's keyword-extraction step benefits from provider failover.
     """
     from models.clients.llm import LLMClient

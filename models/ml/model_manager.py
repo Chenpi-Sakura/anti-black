@@ -49,9 +49,13 @@ class ModelManager:
         if cloud_vlm_cfg.get('enabled', False):
             from models.clients.cloud_vlm import CloudVLMClient
             self._cloud_vlm_client = CloudVLMClient(
-                api_base=cloud_vlm_cfg.get('api_base', 'https://dashscope.aliyuncs.com/compatible-mode/v1'),
-                api_key=cloud_vlm_cfg.get('api_key'),
-                model=cloud_vlm_cfg.get('model', 'qwen2.5-vl-32b'),
+                api_base=cloud_vlm_cfg.get('api_base')
+                or os.environ.get("CLOUD_VLM_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+                api_key=cloud_vlm_cfg.get('api_key')
+                or os.environ.get("CLOUD_VLM_API_KEY")
+                or os.environ.get("DASHSCOPE_API_KEY"),
+                model=cloud_vlm_cfg.get('model')
+                or os.environ.get("CLOUD_VLM_MODEL", "qwen2.5-vl-32b"),
                 timeout=cloud_vlm_cfg.get('timeout', 120)
             )
             logger.info("Cloud VLM client initialized")
@@ -62,8 +66,10 @@ class ModelManager:
             from models.clients.ollama import OllamaClient
             self._ollama_client = OllamaClient(
                 base_url=ollama_cfg.get('base_url', 'http://localhost:11434'),
-                vlm_model=ollama_cfg.get('vlm_model', 'qwen2-vl:2b'),
-                llm_model=ollama_cfg.get('llm_model', 'qwen2.5:7b'),
+                vlm_model=ollama_cfg.get('vlm_model')
+                or os.environ.get("OLLAMA_VLM_MODEL", "qwen2-vl:2b"),
+                llm_model=ollama_cfg.get('llm_model')
+                or os.environ.get("OLLAMA_LLM_MODEL", "qwen2.5:7b"),
                 timeout=ollama_cfg.get('timeout', 120)
             )
             logger.info("Ollama client initialized")

@@ -15,23 +15,35 @@ class CloudVLMClient:
 
     def __init__(
         self,
-        api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_base: Optional[str] = None,
         api_key: Optional[str] = None,
-        model: str = "qwen2.5-vl-32b",
+        model: Optional[str] = None,
         timeout: int = 120
     ):
         """
         Initialize cloud VLM client.
 
+        All model / base / key values fall back to env (CLOUD_VLM_API_BASE /
+        CLOUD_VLM_API_KEY / CLOUD_VLM_MODEL) and finally to a placeholder
+        default so the client can be constructed even without configuration
+        (it will fail at call time, not at construction time).
+
         Args:
-            api_base: API base URL
-            api_key: API key
-            model: VLM model name
+            api_base: API base URL (default: $CLOUD_VLM_API_BASE or DashScope)
+            api_key: API key (default: $CLOUD_VLM_API_KEY or $DASHSCOPE_API_KEY)
+            model: VLM model name (default: $CLOUD_VLM_MODEL or qwen2.5-vl-32b)
             timeout: Request timeout in seconds
         """
-        self.api_base = api_base.rstrip("/")
-        self.api_key = api_key or os.environ.get("DASHSCOPE_API_KEY")
-        self.model = model
+        self.api_base = (
+            api_base
+            or os.environ.get("CLOUD_VLM_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        ).rstrip("/")
+        self.api_key = (
+            api_key
+            or os.environ.get("CLOUD_VLM_API_KEY")
+            or os.environ.get("DASHSCOPE_API_KEY")
+        )
+        self.model = model or os.environ.get("CLOUD_VLM_MODEL", "qwen2.5-vl-32b")
         self.timeout = timeout
 
     def is_available(self) -> bool:

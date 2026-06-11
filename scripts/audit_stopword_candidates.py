@@ -76,9 +76,13 @@ DB_CONFIG = {
     "database": "antiblack",
 }
 
-LLM_API_KEY = os.environ.get("DASHSCOPE_API_KEY")
-LLM_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-LLM_MODEL = "qwen3.6-flash"
+# Audit chain stays on qwen3.6-flash (Backlog-01 双盲设计 — audit LLM 与生产链
+# 异构是有意的)。API key / base URL / model 全部 env 驱动，默认值兼容旧部署。
+LLM_API_KEY = os.environ.get("AUDIT_LLM_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
+LLM_API_BASE = os.environ.get(
+    "AUDIT_LLM_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+)
+LLM_MODEL = os.environ.get("AUDIT_LLM_MODEL", "qwen3.6-flash")
 
 BATCH_SIZE = 10          # candidates per LLM call
 CONTEXTS_PER_WORD = 3

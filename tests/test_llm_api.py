@@ -1,22 +1,43 @@
 #!/usr/bin/env python
-"""Test MiniMax API connection."""
-import os
+"""Smoke test for the primary LLM (default: MiniMax-M2.7 via OpenAI-compatible API).
 
-os.environ['OPENAI_API_KEY'] = 'sk-cp-jnU2-zM8WX_D_UMrnmU4hhdVtj55gCTUd47nRSblVBVX_e0nE7R1Vmfa0yVXlAsG3edY4OJmYjaOFCYO4VTIxt1Y1nOUNEDU4Uw0LNoe5amzeDtZ1IpBr3o'
-os.environ['LLM_API_BASE'] = 'https://api.minimaxi.com/v1'
-os.environ['LLM_MODEL'] = 'MiniMax-M2.7'
+Reads credentials from env (no hardcoded secrets):
+  LLM_PRIMARY_API_KEY (or OPENAI_API_KEY as legacy fallback) - required
+  LLM_PRIMARY_BASE_URL (or LLM_API_BASE)                   - default https://api.minimaxi.com/v1
+  LLM_PRIMARY_MODEL (or LLM_MODEL)                         - default MiniMax-M2.7
+
+Run:
+    export LLM_PRIMARY_API_KEY=<key>
+    python tests/test_llm_api.py
+"""
+import os
+import sys
 
 from openai import OpenAI
 
-client = OpenAI(
-    base_url=os.environ['LLM_API_BASE'],
-    api_key=os.environ['OPENAI_API_KEY']
+API_KEY = (
+    os.environ.get("LLM_PRIMARY_API_KEY")
+    or os.environ.get("OPENAI_API_KEY")
+)
+API_BASE = (
+    os.environ.get("LLM_PRIMARY_BASE_URL")
+    or os.environ.get("LLM_API_BASE", "https://api.minimaxi.com/v1")
+)
+MODEL = (
+    os.environ.get("LLM_PRIMARY_MODEL")
+    or os.environ.get("LLM_MODEL", "MiniMax-M2.7")
 )
 
-print("Testing MiniMax API...")
+if not API_KEY:
+    print("ERROR: set LLM_PRIMARY_API_KEY (or OPENAI_API_KEY) env var first", file=sys.stderr)
+    sys.exit(1)
+
+client = OpenAI(base_url=API_BASE, api_key=API_KEY)
+
+print(f"Testing {MODEL} via {API_BASE}...")
 response = client.chat.completions.create(
-    model=os.environ['LLM_MODEL'],
-    messages=[{'role': 'user', 'content': 'Say hello in one word'}]
+    model=MODEL,
+    messages=[{"role": "user", "content": "Say hello in one word"}],
 )
 print(f"Response: {response.choices[0].message.content}")
 print(f"Model: {response.model}")

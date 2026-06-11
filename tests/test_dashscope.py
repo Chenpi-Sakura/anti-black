@@ -1,25 +1,38 @@
 #!/usr/bin/env python
-"""Test DashScope API with Qwen3.6."""
+"""Smoke test for the DashScope Qwen fallback.
+
+Reads credentials from env (no hardcoded secrets):
+  DASHSCOPE_API_KEY  - required
+  DASHSCOPE_API_BASE - default https://dashscope.aliyuncs.com/compatible-mode/v1
+  DASHSCOPE_MODEL    - default qwen3.6-flash
+
+Run:
+    export DASHSCOPE_API_KEY=<key>
+    python tests/test_dashscope.py
+"""
 import os
-os.environ['DASHSCOPE_API_KEY'] = 'sk-67027e263a3544a48632f25f5f17962a'
-os.environ['LLM_API_BASE'] = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-os.environ['LLM_MODEL'] = 'qwen3.6-27b'
+import sys
 
 from openai import OpenAI
 
-client = OpenAI(
-    api_key=os.environ['DASHSCOPE_API_KEY'],
-    base_url=os.environ['LLM_API_BASE']
+API_KEY = os.environ.get("DASHSCOPE_API_KEY")
+API_BASE = os.environ.get(
+    "DASHSCOPE_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
+MODEL = os.environ.get("DASHSCOPE_MODEL", "qwen3.6-flash")
 
-print("Testing DashScope API with Qwen3.6-27b...")
+if not API_KEY:
+    print("ERROR: set DASHSCOPE_API_KEY env var first", file=sys.stderr)
+    sys.exit(1)
+
+client = OpenAI(base_url=API_BASE, api_key=API_KEY)
+
+print(f"Testing {MODEL} via {API_BASE}...")
 messages = [{"role": "user", "content": "你是谁?用一句话回答"}]
-
 completion = client.chat.completions.create(
-    model=os.environ['LLM_MODEL'],
+    model=MODEL,
     messages=messages,
-    extra_body={"enable_thinking": False}
+    extra_body={"enable_thinking": False},
 )
-
 print(f"Response: {completion.choices[0].message.content}")
 print("API test PASSED!")
