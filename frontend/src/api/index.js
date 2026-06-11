@@ -106,3 +106,11 @@ export const conversationApi = {
 }
 
 export default api
+
+// Knowledge Graph APIs
+export const kgApi = {
+  query: ({ text, mode = 'mix', top_k = 10 }) =>
+    api.get('/kg/query', { params: { text, mode, top_k } }),
+  entitySubgraph: (entityName, { depth = 1, top_k = 10 } = {}) =>
+    api.get(`/kg/entities/${encodeURIComponent(entityName)}/subgraph`, { params: { depth, top_k } }),
+}

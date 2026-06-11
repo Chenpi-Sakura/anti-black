@@ -3,6 +3,9 @@ import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
   plugins: [vue()],
+  optimizeDeps: {
+    include: ['cytoscape', 'cytoscape-cose-bilkent'],
+  },
   server: {
     port: 5173,
     proxy: {

@@ -30,6 +30,11 @@ const routes = [
     path: '/feedback',
     name: 'Feedback',
     component: () => import('../views/Feedback.vue')
+  },
+  {
+    path: '/kg',
+    name: 'KnowledgeGraph',
+    component: () => import('../views/KnowledgeGraph.vue')
   }
 ]
 

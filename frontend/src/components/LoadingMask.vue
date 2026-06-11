@@ -12,10 +12,10 @@
 </template>
 
 <script setup>
-withDefaults(defineProps({
+defineProps({
   loading: { type: Boolean, default: false },
   text: { type: String, default: '加载中...' }
-}), {})
+})
 </script>
 
 <style scoped>

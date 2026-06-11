@@ -83,6 +83,11 @@
               @click="goToClueDetail"
             />
           </div>
+          <div class="results-actions" v-if="clueResults.length > 0">
+            <el-button size="small" type="primary" plain @click="openKnowledgeGraph">
+              查看知识图谱
+            </el-button>
+          </div>
         </div>
       </div>
 
@@ -129,6 +134,9 @@ const examples = [
   '搜索涉及微信号的诈骗引流情报',
   '查看最近一周贴吧的流量作弊信息'
 ]
+
+// 用于"查看知识图谱"入口的当前查询文本
+const currentQueryText = ref('')
 
 onMounted(async () => {
   await loadConversationList()
@@ -187,6 +195,7 @@ async function handleQuery() {
 
   const text = queryText.value.trim()
   queryText.value = ''
+  currentQueryText.value = text
 
   messages.value.push({
     role: 'user',
@@ -390,6 +399,14 @@ async function scrollToBottom() {
 
 function goToClueDetail(clueId) {
   router.push(`/clues/${clueId}`)
+}
+
+function openKnowledgeGraph() {
+  const seed = currentQueryText.value
+    || [...messages.value].reverse().find(m => m.role === 'user')?.content
+    || ''
+  if (!seed) return
+  window.open(`/kg?text=${encodeURIComponent(seed)}`, '_blank')
 }
 </script>
 
@@ -651,6 +668,12 @@ function goToClueDetail(clueId) {
 .results-header h3 {
   font-size: var(--font-size-sm);
   font-weight: 600;
+}
+
+.results-actions {
+  margin-top: var(--spacing-sm);
+  display: flex;
+  justify-content: center;
 }
 
 .results-list {

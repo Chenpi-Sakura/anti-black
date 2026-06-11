@@ -11,6 +11,8 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",
     "axios": "^1.6.0",
+    "cytoscape": "^3.34.0",
+    "cytoscape-cose-bilkent": "^4.1.0",
     "element-plus": "^2.5.0",
     "highlight.js": "^11.10.0",
     "marked": "^18.0.0",

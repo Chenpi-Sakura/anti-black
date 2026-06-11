@@ -19,6 +19,10 @@
           <el-icon><Document /></el-icon>
           <span>线索列表</span>
         </router-link>
+        <router-link to="/kg" class="nav-item">
+          <el-icon><DataLine /></el-icon>
+          <span>知识图谱</span>
+        </router-link>
         <router-link to="/feedback" class="nav-item">
           <el-icon><Edit /></el-icon>
           <span>反馈管理</span>
@@ -41,7 +45,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from './stores/app'
 import { systemApi } from './api'
-import { Monitor, Search, Document, Edit } from '@element-plus/icons-vue'
+import { Monitor, Search, Document, DataLine, Edit } from '@element-plus/icons-vue'
 
 const store = useAppStore()
 

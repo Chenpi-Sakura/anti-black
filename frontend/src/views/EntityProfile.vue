@@ -43,7 +43,12 @@
         </div>
 
         <div class="related-card" v-if="profile.related_entities?.length">
-          <h3>关联实体</h3>
+          <h3>
+            关联实体
+            <el-link type="primary" @click="goToGraph" class="link-right">
+              查看图谱 →
+            </el-link>
+          </h3>
           <div class="related-list">
             <div
               v-for="entity in profile.related_entities"
@@ -104,6 +109,12 @@ function goToEntity(entityId) {
 
 function goToClue(clueId) {
   router.push(`/clues/${clueId}`)
+}
+
+function goToGraph() {
+  const seed = profile.value?.raw_value || profile.value?.entity_id || ''
+  if (!seed) return
+  window.open(`/kg?text=${encodeURIComponent(seed)}&mode=local`, '_blank')
 }
 
 onMounted(async () => {
@@ -193,6 +204,11 @@ onMounted(async () => {
 
 .risk-dist-card h3, .related-card h3, .evidence-card h3 {
   margin-bottom: var(--spacing-sm);
+}
+
+.link-right {
+  float: right;
+  font-size: var(--font-size-xs);
 }
 
 .risk-list, .related-list, .evidence-list {

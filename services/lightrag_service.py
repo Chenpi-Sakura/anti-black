@@ -458,6 +458,91 @@ class LightRAGIntegrator:
             logger.warning(f"LightRAG delete failed for '{slang_word}': {e}")
             return False
 
+    async def get_raw_graph(self, max_nodes: int = 200) -> Dict[str, Any]:
+        """Read the full knowledge graph directly from Neo4j, bypassing
+        LightRAG's aquery_data retrieval pipeline.
+
+        aquery_data returns entities[] and relationships[] from two different
+        retrieval paths (EntityRank + graph BFS), which routinely disagree on
+        the entity-name string (e.g. "QQ账号" vs "QQ帐号") — producing
+        hundreds of dangling edges.  This method uses LightRAG's native
+        get_knowledge_graph(node_label="*") which reads the **same Neo4j
+        graph** with a single Cypher query, guaranteeing endpoint alignment.
+
+        Returns the same shape as aquery_data so the frontend GraphCanvas
+        component doesn't need any changes:
+          {status, data: {entities[], relationships[], chunks[], references[]}, metadata}
+        """
+        if not self._rag or not self._initialized:
+            return {"data": {}, "status": "failure", "message": "LightRAG not initialized"}
+
+        kg = await self._rag.chunk_entity_relation_graph.get_knowledge_graph(
+            node_label="*", max_depth=3, max_nodes=max_nodes,
+        )
+
+        # Neo4j get_knowledge_graph returns:
+        #   n.labels[0]  = entity_id string (may be numeric if MOExtractor
+        #     assigned order IDs; may be real Chinese names like '账号交易')
+        #   n.properties has all Cypher properties including entity_type etc.
+        # We use entity_id = labels[0] as the entity_name.
+        node_name_map: Dict[str, str] = {}
+        for n in kg.nodes:
+            real_name = n.labels[0] if n.labels else str(n.id)
+            node_name_map[str(n.id)] = real_name
+
+        nodes = [
+            {
+                "entity_name": node_name_map[str(n.id)],
+                "entity_type": n.properties.get("entity_type", ""),
+                "description": n.properties.get("description", ""),
+                "source_id": n.properties.get("source_id", ""),
+                "file_path": n.properties.get("file_path", ""),
+                "created_at": n.properties.get("created_at", ""),
+                "reference_id": "",
+            }
+            for n in kg.nodes
+        ]
+
+        # Deduplicate edges by (source, target, type) in case Neo4j doesn't
+        edges = []
+        seen = set()
+        for e in kg.edges:
+            key = (e.source, e.target, e.type or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            src_id = node_name_map.get(e.source, e.source)
+            tgt_id = node_name_map.get(e.target, e.target)
+            edges.append({
+                "src_id": src_id,
+                "tgt_id": tgt_id,
+                "description": e.properties.get("description", ""),
+                "keywords": e.properties.get("keywords", ""),
+                "weight": float(e.properties.get("weight", 1.0)),
+                "source_id": e.properties.get("source_id", ""),
+                "file_path": e.properties.get("file_path", ""),
+                "created_at": e.properties.get("created_at", ""),
+                "reference_id": "",
+            })
+
+        return {
+            "status": "success",
+            "data": {
+                "entities": nodes,
+                "relationships": edges,
+                "chunks": [],
+                "references": [],
+            },
+            "metadata": {
+                "query_mode": "raw",
+                "is_truncated": kg.is_truncated,
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+            },
+            "query": "",
+            "mode": "raw",
+        }
+
     def get_stats(self) -> Dict[str, int]:
         """Get knowledge graph statistics."""
         if not self._rag or not self._initialized:
