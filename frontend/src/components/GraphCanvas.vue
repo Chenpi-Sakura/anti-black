@@ -20,17 +20,28 @@ const containerRef = ref(null)
 let cy = null
 let currentLayout = null
 
-// Blue-primary palette — degrees of blue for the most common entity types.
-// WECHAT and PRICE/PRICE get warm accents for high-signal / value tracking.
+// High-contrast palette — 10 个色相互不相邻(红/橙/黄/绿/青/蓝/紫/粉/棕/灰),
+// 即使节点缩到 4-6px 也能在视觉上区分。暖色(WECHAT/PRICE/TOOL/TACTIC)对应
+// 强信号,冷色(数据/标识类)对应静态信息。
 const TYPE_COLORS = {
-  PERSON: '#1e80ff', ORG: '#409eff', PHONE: '#6aaeff',
-  WECHAT: '#f56c6c', ACCOUNT: '#92bfff', URL: '#2d7dd2',
-  ADDRESS: '#57a0ff', WHATSAPP: '#8cbaff', TELEGRAM: '#409eff',
-  QQ: '#7cb4ff',
-  RESOURCE: '#409eff', INTENT: '#6aaeff', TACTIC: '#1e80ff',
-  TARGET: '#2d7dd2', SCENE: '#57a0ff', TOOL: '#92bfff',
-  PRICE: '#e6a23c',
-  OTHER: '#c0c4cc',
+  PERSON:   '#e84545',   // 红    — 人物
+  WECHAT:   '#f56c6c',   // 浅红  — 微信号(高风险)
+  PRICE:    '#faad14',   // 金黄  — 价格
+  TOOL:     '#a0522d',   // 棕    — 工具(灰产工具)
+  TACTIC:   '#ff7a45',   // 橙    — 手法
+  ORG:      '#52c41a',   // 绿    — 组织
+  PHONE:    '#13c2c2',   // 青    — 手机号
+  URL:      '#1d39c4',   // 深蓝  — 网址
+  QQ:       '#722ed1',   // 紫    — QQ
+  ACCOUNT:  '#eb2f96',   // 粉    — 账号
+  WHATSAPP: '#36cfc9',   // 浅青  — WhatsApp
+  TELEGRAM: '#1890ff',   // 中蓝  — Telegram
+  RESOURCE: '#7cb305',   // 草绿  — 资源
+  INTENT:   '#ffc53d',   // 暖黄  — 意图
+  TARGET:   '#2f54eb',   // 钴蓝  — 目标
+  SCENE:    '#a0d911',   // 黄绿  — 场景
+  ADDRESS:  '#08979c',   // 墨青  — 地址
+  OTHER:    '#8c8c8c',   // 灰    — 其他
 }
 
 const CN_TYPE_MAP = {
@@ -48,13 +59,16 @@ function normalizeType(t) {
 function buildElements(data) {
   if (!data) return []
 
-  // Keep ALL entities (full-load mode, User Feedback #4 revised).
-  // Previously we filtered out isolated nodes here, but that caused
-  // edge-creation failures when a relationship referenced a non-entity
-  // name (data quality). Full load is also what the user expects.
   const allRels = data.relationships || []
+  const allEnts = data.entities || []
 
-  const nodes = (data.entities || []).map(e => {
+  // 孤立节点过滤:只保留至少被一条关系引用的实体
+  // (上一轮决策 "Keep ALL entities" 在新反馈下被覆盖,见 plan)
+  const referenced = new Set()
+  for (const r of allRels) { referenced.add(r.src_id); referenced.add(r.tgt_id) }
+  const entities = allEnts.filter(e => referenced.has(e.entity_name))
+
+  const nodes = entities.map(e => {
     const type = normalizeType(e.entity_type)
     const degreeWeight = allRels
       .filter(r => r.src_id === e.entity_name || r.tgt_id === e.entity_name)
@@ -72,8 +86,8 @@ function buildElements(data) {
     }
   })
 
-  // Only create edges whose source AND target exist in the entity list
-  const entityNames = new Set((data.entities || []).map(e => e.entity_name))
+  // Only create edges whose source AND target exist in the (filtered) entity list
+  const entityNames = new Set(entities.map(e => e.entity_name))
   const edges = allRels
     .filter(r => entityNames.has(r.src_id) && entityNames.has(r.tgt_id))
     .map((r, i) => ({
@@ -95,7 +109,12 @@ onMounted(() => {
   // High-DPI rendering fix — cytoscape defaults to CSS px which on
   // retina/4K screens looks blurry. Explicit devicePixelRatio scaling
   // matches the canvas to the actual physical resolution.
+  //
+  // Windows 125%/150% 缩放下 dpr ∈ {1.25, 1.5},所有 CSS px 值
+  // (font-size, border-width, node width/height, edge width)
+  // 都需 × SCALE 才不会在物理像素上被拉伸变糊。
   const dpr = window.devicePixelRatio || 1
+  const SCALE = dpr
   cy = cytoscape({
     container: containerRef.value,
     elements: buildElements(props.graphData),
@@ -106,22 +125,24 @@ onMounted(() => {
           'background-opacity': 0.88,
           'label': 'data(label)',
           'color': '#1a4d8f',
-          'font-size': 12,
+          'font-size': 12 * SCALE,
           'font-weight': 600,
           'text-valign': 'bottom',
           'text-halign': 'center',
           'text-wrap': 'wrap',
-          'text-max-width': 100,
-          'text-margin-y': 6,
-          'width': 'mapData(weight, 0, 10, 24, 60)',
-          'height': 'mapData(weight, 0, 10, 24, 60)',
-          'border-width': 2,
+          'text-max-width': 70 * SCALE,
+          'text-margin-y': 4 * SCALE,
+          // 缩小视图时字号跟着缩,避免字号 > 节点直径造成视觉重叠
+          'min-zoomed-font-size': 8,
+          'width': `mapData(weight, 0, 10, ${24 * SCALE}, ${60 * SCALE})`,
+          'height': `mapData(weight, 0, 10, ${24 * SCALE}, ${60 * SCALE})`,
+          'border-width': 2 * SCALE,
           'border-color': '#fff',
           'border-opacity': 0.95,
       }},
       { selector: 'edge', style: {
           'curve-style': 'bezier',
-          'width': 'mapData(weight, 0, 1, 0.6, 3)',
+          'width': `mapData(weight, 0, 1, ${0.6 * SCALE}, ${3 * SCALE})`,
           'line-color': '#92bfff',
           'line-opacity': 0.6,
           'target-arrow-color': '#409eff',
@@ -130,16 +151,21 @@ onMounted(() => {
       }},
       { selector: 'node:selected', style: {
           'border-color': '#409eff',
-          'border-width': 4,
+          'border-width': 4 * SCALE,
       }},
       { selector: 'edge:selected', style: {
           'line-color': '#409eff',
           'target-arrow-color': '#409eff',
-          'width': 4,
+          'width': 4 * SCALE,
       }},
     ],
-    layout: { name: 'cose-bilkent', animate: false, randomize: true, nodeRepulsion: 20000, idealEdgeLength: 120, padding: 60, fit: true },
-    minZoom: 0.15,
+    // 间距三参数 + 中心引力联合调,目标:打散链式拓扑 + 节点不重叠
+    // - nodeRepulsion 80000: 中等斥力,比原始 4x 不挤,但不会把全图撑到 fit 缩成点
+    // - idealEdgeLength 180: 理想边长,略 > 节点直径,允许紧邻但标签不挤
+    // - gravity 0.1 (默认 0.25): 中心引力减半,让图不再被拉成对角线
+    // - padding 30: 画布边距小,fit 后 zoom 不被压太小(关键:否则节点会缩成点)
+    layout: { name: 'cose-bilkent', animate: false, randomize: true, nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true },
+    minZoom: 0.1,
     maxZoom: 3,
   })
 
@@ -173,9 +199,10 @@ watch(() => props.graphData, (newData) => {
   cy.elements().remove()
   cy.add(buildElements(newData))
   if (cy.elements().length === 0) return               // nothing to render
+  // randomize: true 重新摇随机起点,避免连续两次新图都收敛到同一条对角线
   currentLayout = cy.layout({
-    name: 'cose-bilkent', animate: false, randomize: false,
-    nodeRepulsion: 20000, idealEdgeLength: 120, padding: 60, fit: true,
+    name: 'cose-bilkent', animate: false, randomize: true,
+    nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true,
   })
   currentLayout.one('layoutstop', () => emit('layout-end'))
   currentLayout.run()
@@ -196,7 +223,7 @@ watch(() => props.selectedNodeId, (id) => {
 // Exposed for parent to call fit/relayout
 defineExpose({
   fit() { cy?.fit(undefined, 30) },
-  reload() { cy?.layout({ name: 'cose-bilkent', animate: true, randomize: true }).run() }
+  reload() { cy?.layout({ name: 'cose-bilkent', animate: true, randomize: true, nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true }).run() }
 })
 </script>
 
@@ -205,5 +232,7 @@ defineExpose({
   width: 100%;
   height: 100%;
   min-height: 0;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
 }
 </style>

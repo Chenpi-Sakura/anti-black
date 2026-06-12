@@ -26,6 +26,19 @@
           @background-click="onBackgroundClick"
           @layout-end="layoutReady = true"
         />
+        <NodeInfoCard
+          :mode="cardMode"
+          :node-detail="nodeDetail"
+          :edge-detail="edgeDetail"
+          :adjacent-rels="adjacentRels"
+          :rel-chunk="relChunk"
+          :entity-count="entityCount"
+          :rel-count="relCount"
+          :total-entity-count="totalEntityCount"
+          :total-rel-count="totalRelCount"
+          :graph-data="graphData"
+        />
+        <GraphLegend />
         <LoadingMask v-if="loading" :loading="loading" :text="loadingText" />
         <EmptyState v-else-if="isNoData" :description="emptyText" />
       </div>
@@ -45,31 +58,6 @@
             <ReferenceList :references="graphData?.references || []" />
           </el-tab-pane>
         </el-tabs>
-
-        <div v-if="nodeDetail" class="kg-detail">
-          <h4 class="detail-title">{{ nodeDetail.entity_name }}</h4>
-          <el-tag size="small">{{ nodeDetail.entity_type }}</el-tag>
-          <p class="detail-text">{{ nodeDetail.description || '暂无描述' }}</p>
-          <div class="detail-stat"><span>来源:</span> {{ (nodeDetail.file_path || '').slice(0, 40) }}</div>
-          <h5 class="detail-subtitle">关联关系 ({{ adjacentRels.length }})</h5>
-          <ul class="rel-list">
-            <li v-for="r in adjacentRels" :key="`${r.src_id}-${r.tgt_id}`">
-              <span class="rel-src">{{ r.src_id }}</span><span class="rel-arrow">→</span><span class="rel-tgt">{{ r.tgt_id }}</span>
-            </li>
-            <li v-if="!adjacentRels.length" class="rel-none">无</li>
-          </ul>
-        </div>
-
-        <div v-else-if="edgeDetail" class="kg-detail">
-          <h4 class="detail-title">{{ edgeDetail.src_id }} → {{ edgeDetail.tgt_id }}</h4>
-          <div class="detail-stat"><span>权重:</span> {{ (edgeDetail.weight || 0).toFixed(2) }}</div>
-          <p class="detail-text">{{ edgeDetail.description || '暂无描述' }}</p>
-          <div v-if="edgeDetail.keywords" class="detail-keywords">
-            <el-tag v-for="k in split(edgeDetail.keywords)" :key="k" size="small" effect="plain">{{ k }}</el-tag>
-          </div>
-          <h5 v-if="relChunk" class="detail-subtitle">来源分块</h5>
-          <pre v-if="relChunk" class="chunk-preview">{{ truncate(relChunk.content, 600) }}</pre>
-        </div>
       </aside>
     </div>
   </div>
@@ -82,6 +70,8 @@ import PageHeader from '../components/PageHeader.vue'
 import LoadingMask from '../components/LoadingMask.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GraphCanvas from '../components/GraphCanvas.vue'
+import NodeInfoCard from '../components/kg/NodeInfoCard.vue'
+import GraphLegend from '../components/kg/GraphLegend.vue'
 import EntityList from '../components/kg/EntityList.vue'
 import RelationshipList from '../components/kg/RelationshipList.vue'
 import ChunkList from '../components/kg/ChunkList.vue'
@@ -100,12 +90,22 @@ const activeTab = ref('entities')
 const errorMessage = ref('')
 const layoutReady = ref(false)          // User Feedback #1: wait for layoutstop
 const graphRef = ref(null)
+// 数据库真实总量(由后端 metadata.total_* 填);为 0 时前端不显示
+const totalEntityCount = ref(0)
+const totalRelCount = ref(0)
 
 const isNoData = computed(() =>
   !loading.value && !graphData.value
 )
 const entityCount = computed(() => graphData.value?.entities?.length || 0)
 const relCount = computed(() => graphData.value?.relationships?.length || 0)
+
+// 浮窗模式:有节点详情 → 'node';否则有边详情 → 'edge';否则 'stats'
+const cardMode = computed(() => {
+  if (nodeDetail.value) return 'node'
+  if (edgeDetail.value) return 'edge'
+  return 'stats'
+})
 
 const emptyText = computed(() => {
   if (errorMessage.value) return errorMessage.value
@@ -140,9 +140,6 @@ const relChunk = computed(() => {
   return graphData.value.chunks.find(c => c.file_path === edgeDetail.value.file_path) || null
 })
 
-function split(s) { return (s || '').split(',').map(v => v.trim()).filter(Boolean) }
-function truncate(s, n) { return (s || '').length > n ? s.slice(0, n) + '…' : (s || '') }
-
 async function runQueryCustom(text) {
   // 允许外部传入搜索词（用于初始全量加载）
   if (text !== undefined) queryText.value = text
@@ -162,7 +159,7 @@ async function runQuery() {
   try {
     // 初始全量加载: raw 模式(Neo4j 直连,端点100%对齐)
     // 用户搜索时: mix 模式(语义向量检索)
-    const topK = isInitialLoad.value ? 200 : 30
+    const topK = isInitialLoad.value ? 1000 : 30
     const searchText = text || ''
     const m = isInitialLoad.value ? 'raw' : (mode.value || 'mix')
     const res = await kgApi.query({ text: searchText, mode: m, top_k: topK })
@@ -172,6 +169,10 @@ async function runQuery() {
       graphData.value = null
     } else {
       graphData.value = d.data || { entities: [], relationships: [], chunks: [], references: [] }
+      // 数据库真实总量(从后端 metadata 拿,0 兜底) — 与画出来的切片区分
+      const meta = d.metadata || {}
+      totalEntityCount.value = meta.total_entities || 0
+      totalRelCount.value = meta.total_relations || 0
     }
   } catch (e) {
     errorMessage.value = e.response?.data?.detail || e.message || '请求失败'
@@ -212,25 +213,11 @@ onMounted(() => {
 
 <style scoped>
 .kg-page { display: flex; flex-direction: column; height: 100%; }
-.kg-body { display: flex; flex: 1; min-height: 0; gap: 16px; padding: var(--spacing-md, 16px); }
+.kg-body { display: flex; flex: 1; min-height: 0; gap: 16px; padding: 6px 16px 16px; }
 .kg-canvas-wrap { flex: 1; position: relative; border-radius: 8px; background: #f8fbff; overflow: hidden; border: 1px solid #d9e6f2; }
 .kg-side-panel { width: 340px; min-width: 300px; display: flex; flex-direction: column; overflow-y: auto; border-radius: 8px; border: 1px solid #d9e6f2; padding: var(--spacing-sm, 12px); }
 .kg-side-panel :deep(.el-tabs__item.is-active) { color: #409eff; }
 .kg-side-panel :deep(.el-tabs__active-bar) { background: #409eff; }
 .kg-search { width: 320px; }
 .kg-mode { width: 140px; }
-.kg-detail { padding: 12px 4px 0; border-top: 2px solid #409eff; margin-top: 8px; }
-.detail-title { margin: 0 0 6px; font-size: var(--font-size-base, 15px); font-weight: 600; color: #1a4d8f; }
-.detail-text { color: var(--color-text-secondary, #666); font-size: var(--font-size-sm, 13px); line-height: 1.6; margin: 6px 0; }
-.detail-stat { font-size: var(--font-size-xs, 12px); color: var(--color-text-muted, #999); }
-.detail-stat span { font-weight: 600; color: #409eff; }
-.detail-subtitle { margin: 10px 0 4px; font-size: var(--font-size-sm, 13px); font-weight: 600; color: #1a4d8f; }
-.detail-keywords { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
-.rel-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 2px; }
-.rel-list li { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 0; border-bottom: 1px dashed #d9e6f2; }
-.rel-src { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: #1a4d8f; }
-.rel-tgt { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: #1a4d8f; }
-.rel-arrow { color: #409eff; flex-shrink: 0; }
-.rel-none { color: var(--color-text-muted, #999); font-style: italic; }
-.chunk-preview { background: #f0f6ff; padding: 8px; border-radius: 4px; font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
 </style>
