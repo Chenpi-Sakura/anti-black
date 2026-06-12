@@ -183,9 +183,10 @@ onMounted(() => {
   // force-directed graphs feel alive.
   cy.on('drag', 'node', () => {})
   cy.on('dragfree', 'node', evt => {
-    // Re-anchor the dragged node so the simulation holds the new position
-    // while gently re-balancing neighbours.
-    evt.target.neighborhood().layout({ name: 'cose', animate: false, randomize: false, fit: false }).run()
+    // 用户拖拽节点后,不强行重排邻接节点(原 neighborhood().layout()
+    // 会触发布局重跑,把大量节点推回网格/原点 — User-Feedback-4)。
+    // 让用户拖拽后的位置固定,保留力导向的自然感。
+    if (cy) cy.fit(undefined, 30)
   })
 })
 
