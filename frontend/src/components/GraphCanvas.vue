@@ -164,8 +164,8 @@ onMounted(() => {
     // 内置 `cose` 实现简单、收敛快,1k 节点 <1s 完成且不报 RangeError。
     // `animate: false` 算的时候不假装动画(避免每帧 reflow 让 LCP 失败)。
     layout: { name: 'cose', animate: false, randomize: true, padding: 30, fit: true,
-              nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1,
-              numIter: 100, initialTemp: 200, coolingFactor: 0.95 },
+              nodeRepulsion: 120000, idealEdgeLength: 280, gravity: 0.04,
+              numIter: 120, initialTemp: 200, coolingFactor: 0.95 },
     minZoom: 0.1,
     maxZoom: 3,
   })
@@ -203,8 +203,8 @@ watch(() => props.graphData, (newData) => {
   // animate: false 算的时候不假装动画,避免每帧 reflow 让 LCP 失败
   try {
     currentLayout = cy.layout({
-      name: 'cose', animate: false, randomize: true, numIter: 100,
-      nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true,
+      name: 'cose', animate: false, randomize: true, numIter: 120,
+      nodeRepulsion: 120000, idealEdgeLength: 280, gravity: 0.04, padding: 30, fit: true,
     })
     currentLayout.one('layoutstop', () => emit('layout-end'))
     currentLayout.one('layoutstop', () => { currentLayout = null })
@@ -234,7 +234,7 @@ defineExpose({
   reload() {
     if (!cy) return
     try {
-      cy.layout({ name: 'cose', animate: false, randomize: true, numIter: 100, nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true }).run()
+      cy.layout({ name: 'cose', animate: false, randomize: true, numIter: 120, nodeRepulsion: 120000, idealEdgeLength: 280, gravity: 0.04, padding: 30, fit: true }).run()
     } catch (e) {
       console.warn('reload layout failed:', e)
     }
