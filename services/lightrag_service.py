@@ -525,6 +525,28 @@ class LightRAGIntegrator:
                 "reference_id": "",
             })
 
+        # 数据库真实总量 — 直接复用 Neo4JStorage 的 driver 跑两条 COUNT。
+        # 比 PG lightrag_full_* 副本更准(Neo4j 是图谱真相源,PG 是 KV 副本有同步延迟),
+        # 也避免了改 get_kg_stats 触及的 schema 命名坑。
+        total_entities = 0
+        total_relations = 0
+        try:
+            neo4j_storage = self._rag.chunk_entity_relation_graph
+            driver = getattr(neo4j_storage, "_driver", None)
+            database = getattr(neo4j_storage, "_DATABASE", None)
+            if driver is not None:
+                async with driver.session(database=database) as session:
+                    r1 = await session.run("MATCH (n) RETURN count(n) AS c")
+                    rec1 = await r1.single()
+                    total_entities = int(rec1["c"]) if rec1 else 0
+                    r2 = await session.run("MATCH ()-[r]->() RETURN count(r) AS c")
+                    rec2 = await r2.single()
+                    total_relations = int(rec2["c"]) if rec2 else 0
+            else:
+                logger.warning("Neo4j driver not available on storage, total_* will be 0")
+        except Exception as e:
+            logger.warning("Neo4j COUNT failed, total_* will be 0: %s", e)
+
         return {
             "status": "success",
             "data": {
@@ -538,6 +560,8 @@ class LightRAGIntegrator:
                 "is_truncated": kg.is_truncated,
                 "node_count": len(nodes),
                 "edge_count": len(edges),
+                "total_entities": total_entities,
+                "total_relations": total_relations,
             },
             "query": "",
             "mode": "raw",
