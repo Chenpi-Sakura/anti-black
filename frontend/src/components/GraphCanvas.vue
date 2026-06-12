@@ -159,12 +159,13 @@ onMounted(() => {
           'width': 4 * SCALE,
       }},
     ],
-    // 间距三参数 + 中心引力联合调,目标:打散链式拓扑 + 节点不重叠
-    // - nodeRepulsion 80000: 中等斥力,比原始 4x 不挤,但不会把全图撑到 fit 缩成点
-    // - idealEdgeLength 180: 理想边长,略 > 节点直径,允许紧邻但标签不挤
-    // - gravity 0.1 (默认 0.25): 中心引力减半,让图不再被拉成对角线
-    // - padding 30: 画布边距小,fit 后 zoom 不被压太小(关键:否则节点会缩成点)
-    layout: { name: 'cose-bilkent', animate: false, randomize: true, nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true },
+    // 初始 layout 用 cytoscape 内置的轻量力导向 `cose` (非 cose-bilkent)。
+    // cose-bilkent 在 1k 节点上首跑 ~8.8s 阻塞主线程(cytoscape 火焰图实测),
+    // 内置 `cose` 实现简单、收敛快,1k 节点 <1s 完成且不报 RangeError。
+    // `animate: false` 算的时候不假装动画(避免每帧 reflow 让 LCP 失败)。
+    layout: { name: 'cose', animate: false, randomize: true, padding: 30, fit: true,
+              nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1,
+              numIter: 100, initialTemp: 200, coolingFactor: 0.95 },
     minZoom: 0.1,
     maxZoom: 3,
   })
@@ -184,7 +185,7 @@ onMounted(() => {
   cy.on('dragfree', 'node', evt => {
     // Re-anchor the dragged node so the simulation holds the new position
     // while gently re-balancing neighbours.
-    evt.target.neighborhood().layout({ name: 'cose-bilkent', animate: true, randomize: false, fit: false }).run()
+    evt.target.neighborhood().layout({ name: 'cose', animate: false, randomize: false, fit: false }).run()
   })
 })
 
@@ -199,13 +200,21 @@ watch(() => props.graphData, (newData) => {
   cy.elements().remove()
   cy.add(buildElements(newData))
   if (cy.elements().length === 0) return               // nothing to render
-  // randomize: true 重新摇随机起点,避免连续两次新图都收敛到同一条对角线
-  currentLayout = cy.layout({
-    name: 'cose-bilkent', animate: false, randomize: true,
-    nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true,
-  })
-  currentLayout.one('layoutstop', () => emit('layout-end'))
-  currentLayout.run()
+  // 改用轻量 `cose`(非 cose-bilkent)— 1k 节点 <1s 完成,不阻塞主线程 8s+
+  // animate: false 算的时候不假装动画,避免每帧 reflow 让 LCP 失败
+  try {
+    currentLayout = cy.layout({
+      name: 'cose', animate: false, randomize: true, numIter: 100,
+      nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true,
+    })
+    currentLayout.one('layoutstop', () => emit('layout-end'))
+    currentLayout.one('layoutstop', () => { currentLayout = null })
+    currentLayout.run()
+  } catch (e) {
+    console.warn('cose layout failed, falling back to grid:', e)
+    cy.layout({ name: 'grid', fit: true, padding: 30 }).run()
+    emit('layout-end')
+  }
 }, { deep: true })
 
 watch(() => props.selectedNodeId, (id) => {
@@ -223,7 +232,14 @@ watch(() => props.selectedNodeId, (id) => {
 // Exposed for parent to call fit/relayout
 defineExpose({
   fit() { cy?.fit(undefined, 30) },
-  reload() { cy?.layout({ name: 'cose-bilkent', animate: true, randomize: true, nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true }).run() }
+  reload() {
+    if (!cy) return
+    try {
+      cy.layout({ name: 'cose', animate: false, randomize: true, numIter: 100, nodeRepulsion: 80000, idealEdgeLength: 180, gravity: 0.1, padding: 30, fit: true }).run()
+    } catch (e) {
+      console.warn('reload layout failed:', e)
+    }
+  }
 })
 </script>
 
