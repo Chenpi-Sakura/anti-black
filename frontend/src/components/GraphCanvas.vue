@@ -182,11 +182,9 @@ onMounted(() => {
   // and the simulation will re-settle them. This is what makes
   // force-directed graphs feel alive.
   cy.on('drag', 'node', () => {})
-  cy.on('dragfree', 'node', evt => {
-    // 用户拖拽节点后,不强行重排邻接节点(原 neighborhood().layout()
-    // 会触发布局重跑,把大量节点推回网格/原点 — User-Feedback-4)。
-    // 让用户拖拽后的位置固定,保留力导向的自然感。
-    if (cy) cy.fit(undefined, 30)
+  cy.on('dragfree', 'node', () => {
+    // 用户拖拽后,什么都不做——让拖拽位置固定,不触发任何 re-layout
+    // 原 neighborhood().layout() 会推其他节点回网格;cy.fit()会改缩放
   })
 })
 
