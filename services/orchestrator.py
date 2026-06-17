@@ -648,6 +648,10 @@ class Orchestrator:
                 "skill": active_skill.name,
                 "steps": active_skill.plan_template,
             })
+            # Add conversation history (future: multi-turn support)
+            for msg in context:
+                messages.append({"role": msg.get("role", "user"),
+                                 "content": msg.get("content", "")})
             tools_for_llm = get_tools_by_names(active_skill.tools)
         else:
             messages = [
@@ -854,6 +858,7 @@ class Orchestrator:
                 await self._stream_progress(query_id, "error", error_msg, None)
                 break
 
+    # DEPRECATED: replaced by invoke_tool() from agent.tools.registry. Keep for backward compat (remove in Phase 5).
     async def _execute_tool(self, tool_name: str, tool_args: dict) -> any:
         """执行工具调用"""
         if tool_name == "search_clues":
