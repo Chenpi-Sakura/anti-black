@@ -191,11 +191,11 @@ All data entities are dataclasses defined in `models/entities.py`:
 The crawler uses CDP mode for anti-detection when connecting to an existing Chrome browser.
 
 **启动方式（用户手动）：**
-1. 手动启动 Chrome：`chrome --remote-debugging-port=1936`
+1. 手动启动 Chrome：`chrome --remote-debugging-port=9222`
 2. 或在 Chrome 地址栏输入：`chrome://inspect/#remote-debugging`
 
 **CDP 连接流程：**
-- MediaCrawler 通过 WebSocket 连接到 `localhost:1936`
+- MediaCrawler 通过 WebSocket 连接到 `localhost:9222`
 - CDP_CONNECT_EXISTING=True 时使用 `/devtools/browser` 端点
 - 用户需要在浏览器弹出的确认对话框中点击"允许"
 

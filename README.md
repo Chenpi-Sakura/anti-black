@@ -549,7 +549,7 @@ pipeline:
 - [ ] PostgreSQL / Neo4j / Redis / Kafka 在远程 VM 运行（`192.168.148.128`）
 - [ ] `.env` 填入所有 API 密钥
 - [ ] `config.yaml` 的 `media_crawler.platforms` 启用目标平台
-- [ ] CDP 模式：手动启动 `chrome --remote-debugging-port=1936`
+- [ ] CDP 模式：手动启动 `chrome --remote-debugging-port=9222`
 - [ ] Redis 持久化配置（dedup 缓存）
 - [ ] Prometheus 指标导出（`monitoring.metrics`）
 - [ ] 日志轮转（`logging` 块配置）

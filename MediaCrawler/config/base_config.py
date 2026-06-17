@@ -56,7 +56,9 @@ ENABLE_CDP_MODE = True
 
 # CDP 调试端口，用于与浏览器通信
 # 如果端口被占用，系统会自动尝试下一个可用端口
-CDP_DEBUG_PORT = 1936
+# 默认 9222 跟 Chrome 远端调试官方端口对齐 (chrome://inspect/#remote-debugging
+# 显示 "Server running at: 127.0.0.1:9222")
+CDP_DEBUG_PORT = 9222
 
 # 自定义浏览器路径（可选）
 # 如果为空，系统会自动检测 Chrome/Edge 的安装路径
