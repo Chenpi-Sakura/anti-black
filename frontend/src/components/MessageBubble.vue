@@ -13,10 +13,12 @@
           <span v-if="message.reasoningDuration" class="reasoning-duration">{{ message.reasoningDuration }}</span>
         </div>
         <div v-if="message._reasoningExpanded" class="reasoning-steps">
-          <div v-for="(step, i) in message.reasoning" :key="i" class="reasoning-step">
-            <span class="step-dot"></span>
+          <div v-for="(step, i) in message.reasoning" :key="i" class="reasoning-step" :class="stepClass(step)">
+            <span class="step-dot" :class="stepDotClass(step)"></span>
             <span class="step-label">{{ step.content || getStageLabel(step.stage) }}</span>
-            <span v-if="step.tool_name" :class="['step-tool', `tool-${step.tool_name}`]">{{ step.tool_name }}</span>
+            <span v-if="step.tool_name && !['skill_selecting','skill_selected','plan'].includes(step.stage)" :class="['step-tool', `tool-${step.tool_name}`]">{{ step.tool_name }}</span>
+            <span v-if="step.elapsed_ms !== undefined" class="step-ms">{{ step.elapsed_ms }}ms</span>
+            <span v-if="step.iteration" class="step-iter">#{{ step.iteration }}</span>
           </div>
         </div>
       </div>
@@ -108,9 +110,32 @@ function getStageLabel(stage) {
     'analyzing': '生成分析报告',
     'results': '整理情报结果',
     'complete': '处理完成',
-    'reasoning': 'LLM 推理过程'
+    'reasoning': 'LLM 推理过程',
+    'skill_selecting': '正在分析意图…选择 Skill',
+    'skill_selected': 'Skill 已选择',
+    'plan': '计划已生成',
+    'thinking': 'LLM 推理中',
+    'tool_started': '工具开始执行',
+    'tool_completed': '工具执行完成',
+    'tool_failed': '工具执行失败',
   }
   return labels[stage] || stage
+}
+
+function stepClass(step) {
+  if (step.stage === 'thinking') return 'step-thinking'
+  if (step.stage === 'tool_started') return 'step-tool-active'
+  if (step.stage === 'tool_failed') return 'step-tool-failed'
+  if (['skill_selecting', 'skill_selected', 'plan'].includes(step.stage)) return 'step-skill'
+  return ''
+}
+
+function stepDotClass(step) {
+  if (step.stage === 'thinking') return 'dot-thinking'
+  if (step.stage === 'tool_started') return 'dot-active'
+  if (step.stage === 'tool_failed') return 'dot-failed'
+  if (['skill_selecting', 'skill_selected', 'plan'].includes(step.stage)) return 'dot-skill'
+  return ''
 }
 
 function formatTime(time) {
@@ -350,4 +375,35 @@ function formatTime(time) {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Step status colors for skill/thinking/tool events */
+.step-skill { background: rgba(0, 150, 255, 0.08); border-radius: 4px; }
+.step-tool-active .step-dot { background: #2563eb; animation: pulse-blue 1.2s ease-in-out infinite; }
+.step-tool-failed .step-dot { background: #dc2626; }
+.step-thinking .step-dot { background: #7c3aed; }
+.step-skill .step-dot { background: #0284c7; }
+.dot-active { background: #2563eb; animation: pulse-blue 1.2s ease-in-out infinite; }
+.dot-failed { background: #dc2626; }
+.dot-thinking { background: #7c3aed; }
+.dot-skill { background: #0284c7; }
+
+.step-ms {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  background: var(--color-divider);
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.step-iter {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+@keyframes pulse-blue {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 </style>

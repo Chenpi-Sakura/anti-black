@@ -55,10 +55,12 @@
                   <span>AI 推理中...</span>
                 </div>
                 <div class="reasoning-steps">
-                  <div v-for="(step, i) in currentReasoningSteps" :key="i" class="reasoning-step">
-                    <span class="step-dot active"></span>
+                  <div v-for="(step, i) in currentReasoningSteps" :key="i" class="reasoning-step" :class="stepClass(step)">
+                    <span class="step-dot" :class="stepDotClass(step)"></span>
                     <span class="step-label">{{ step.content || step.stage }}</span>
-                    <span v-if="step.tool_name" :class="['step-tool', `tool-${step.tool_name}`]">{{ step.tool_name }}</span>
+                    <span v-if="step.tool_name && !['skill_selecting','skill_selected','plan','thinking'].includes(step.stage)" :class="['step-tool', `tool-${step.tool_name}`]">{{ step.tool_name }}</span>
+                    <span v-if="step.elapsed_ms !== undefined" class="step-ms">{{ step.elapsed_ms }}ms</span>
+                    <span v-if="step.iteration" class="step-iter">#{{ step.iteration }}</span>
                   </div>
                 </div>
               </div>
@@ -254,22 +256,56 @@ function handleSSEEvent(event) {
   const stage = event.stage || event.type
 
   if (stage && stage !== 'heartbeat' && stage !== 'content' && !hasStreamingAssistantMessage.value) {
+    // Flatten event.data into the top-level for easier access
+    // (new event types like tool_started/thinking put data in event.data)
+    const data = event.data || {}
+    const toolName = data.tool_name || event.tool_name
+
+    // For thinking events, track elapsed_ms and iteration
+    if (stage === 'thinking' && data.status === 'started') {
+      currentReasoningSteps.value.push({
+        stage,
+        content: 'LLM 推理中…',
+        tool_name: null,
+        iteration: data.iteration,
+        elapsed_ms: 0,
+        time: new Date()
+      })
+      return
+    }
+    if (stage === 'thinking' && data.status === 'completed') {
+      // Update the matching step with elapsed time — match both stage AND iteration
+      // so a delayed completion from round 1 doesn't corrupt round 2's step.
+      const idx = currentReasoningSteps.value.findLastIndex(
+        s => s.stage === 'thinking' && s.iteration === data.iteration
+      )
+      if (idx !== -1) {
+        currentReasoningSteps.value[idx].content = `第 ${data.iteration} 轮推理完成`
+        currentReasoningSteps.value[idx].elapsed_ms = data.elapsed_ms
+        currentReasoningSteps.value[idx].iteration = data.iteration
+      }
+      return
+    }
+
     // Deduplicate by tool_name across ALL steps (not just the last one).
-    // With parallel execution tools complete in arbitrary order so two
-    // events for the same tool may not be adjacent — only checking the
-    // last step would miss those and create duplicate entries.
-    if (event.tool_name) {
+    if (toolName) {
       const existing = currentReasoningSteps.value.find(
-        s => s.tool_name === event.tool_name
+        s => s.tool_name === toolName
       )
       if (existing) {
         existing.stage = stage
-        existing.content = event.content || stage
+        existing.content = data.content || event.content || stage
+        if (data.elapsed_ms !== undefined) existing.elapsed_ms = data.elapsed_ms
+        if (data.result_count !== undefined) existing.content = data.result_count > 0 ? `找到 ${data.result_count} 条结果` : '未找到结果'
+        if (data.iteration !== undefined) existing.iteration = data.iteration
       } else {
         currentReasoningSteps.value.push({
           stage,
-          content: event.content || stage,
-          tool_name: event.tool_name,
+          content: data.content || event.content || stage,
+          tool_name: toolName,
+          elapsed_ms: data.elapsed_ms,
+          iteration: data.iteration,
+          result_count: data.result_count,
           time: new Date()
         })
       }
@@ -277,7 +313,7 @@ function handleSSEEvent(event) {
       // No tool_name → append as a generic reasoning step
       currentReasoningSteps.value.push({
         stage,
-        content: event.content || stage,
+        content: data.content || event.content || stage,
         tool_name: null,
         time: new Date()
       })
@@ -286,6 +322,14 @@ function handleSSEEvent(event) {
 
   switch (event.type) {
     case 'stage':
+      // New event types handled above; skip to avoid overwriting progress
+      if (['skill_selecting', 'skill_selected', 'plan', 'thinking',
+           'tool_started', 'tool_completed', 'tool_failed'].includes(event.stage)) {
+        break
+      }
+      currentProgress.value = event.content || ''
+      break
+
     case 'progress':
       currentProgress.value = event.content || ''
       break
@@ -360,7 +404,23 @@ function getReasoningDuration(steps) {
     const ms = last - first
     if (ms < 1000) return `${ms}ms`
     return `${(ms / 1000).toFixed(1)}s`
+    }
+    return ''
   }
+
+function stepClass(step) {
+  if (step.stage === 'thinking') return 'step-thinking'
+  if (step.stage === 'tool_started') return 'step-tool-active'
+  if (step.stage === 'tool_failed') return 'step-tool-failed'
+  if (['skill_selecting', 'skill_selected', 'plan'].includes(step.stage)) return 'step-skill'
+  return ''
+}
+
+function stepDotClass(step) {
+  if (step.stage === 'thinking') return 'dot-thinking'
+  if (step.stage === 'tool_started') return 'dot-active'
+  if (step.stage === 'tool_failed') return 'dot-failed'
+  if (['skill_selecting', 'skill_selected', 'plan'].includes(step.stage)) return 'dot-skill'
   return ''
 }
 
@@ -687,5 +747,35 @@ function openKnowledgeGraph() {
 @keyframes fadeSlideIn {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Step status colors for skill/thinking/tool events (same as MessageBubble) */
+.step-skill { background: rgba(0, 150, 255, 0.08); border-radius: 4px; }
+.step-tool-active .step-dot { background: #2563eb; animation: pulse-blue 1.2s ease-in-out infinite; }
+.step-tool-failed .step-dot { background: #dc2626; }
+.step-thinking .step-dot { background: #7c3aed; }
+.step-skill .step-dot { background: #0284c7; }
+.dot-active { background: #2563eb; animation: pulse-blue 1.2s ease-in-out infinite; }
+.dot-failed { background: #dc2626; }
+.dot-thinking { background: #7c3aed; }
+.dot-skill { background: #0284c7; }
+
+.step-ms {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  background: var(--color-divider);
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.step-iter {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+@keyframes pulse-blue {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 </style>

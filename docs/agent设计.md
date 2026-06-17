@@ -1,6 +1,6 @@
-# Agent 设计（Orchestrator）— 项目结题文档
+# Agent 设计（Orchestrator + Skill 层）— 项目结题文档
 
-> 字节系黑灰产情报系统的对话式 Agent 层。LLM 驱动的工具编排 + 异构检索融合 + 端到端可观测性。
+> 字节系黑灰产情报系统的对话式 Agent 层。LLM 驱动的工具编排 + 异构检索融合 + **Skill 场景化触发** + 端到端可观测性。
 
 ---
 
@@ -62,7 +62,7 @@
 
 ### 3.1 一句话定位
 
-LLM 自主编排 8 工具，按用户意图路由到 L1 搜索 / L2 钻取 / L3 聚合，生成可解释的端到端情报分析报告。
+LLM 自主编排 **8 工具 + 4 Skill**，按用户意图路由到 Skill 场景（溯源/趋势/黑话调查/风控分析）或通用检索路径，生成可解释的端到端情报分析报告。
 
 ### 3.2 顶层架构图
 
@@ -70,18 +70,34 @@ LLM 自主编排 8 工具，按用户意图路由到 L1 搜索 / L2 钻取 / L3 
 flowchart TB
     subgraph CLIENT["客户端"]
         UI[Vue 3 SPA<br/>聊天页]
+        PSTEP[PlanStepper 组件<br/>4 步步骤条]
+        STIM[StatusTimeline<br/>全链路时间线]
     end
 
     subgraph AGENT["Agent 层"]
         API[POST /queries]
         SSE[GET /stream<br/>SSE]
         ORCH[Orchestrator<br/>主控大脑]
+        SKILL[Phase 0: Skill 选择<br/>关键词 pre-filter + LLM confirm]
+    end
+
+    subgraph SKILLS["Skill 层 (4 个)"]
+        TA[trace-actor<br/>溯源分析]
+        TDA[trend-analysis<br/>趋势分析]
+        SI[slang-investigation<br/>黑话调查]
+        BRI[break-risk-intel<br/>风控情报<br/>(含 ~40 个参考文件)]
+    end
+
+    subgraph REG["注册层"]
+        TR[agent/tools/registry.py<br/>@register_tool 装饰器<br/>8 tool]
+        SR[agent/skills/registry.py<br/>@register_skill 加载器<br/>4 skill]
     end
 
     subgraph LLM["LLM 层"]
         LC[LLMClient<br/>多 provider + circuit breaker]
-        MINIMAX[provider 1<br/>MiniMax-M2.7<br/>(OpenAI 兼容)]
-        FALLBACK[provider 2..N<br/>fallback chain<br/>qwen3.6-flash 等]
+        AGNES[provider 1<br/>Agnes-2.0-Flash<br/>(OpenAI 兼容)]
+        MINIMAX[provider 2<br/>MiniMax-M2.7]
+        FALLBACK[provider 3..N<br/>qwen3.6-flash 等]
     end
 
     subgraph TOOLS["工具层 L1/L2/L3"]
@@ -98,20 +114,29 @@ flowchart TB
 
     UI -->|1. 用户查询| API
     API -->|2. 创建 query_id<br/>后台 asyncio.create_task| ORCH
-    ORCH -->|3. 拼 messages<br/>tools=TOOLS| LC
-    LC --> QWEN
+    ORCH -->|3. Phase 0<br/>skill_selecting| SKILL
+    SKILL -->|4a. 命中 Skill| TA
+    SKILL -->|4a. 命中 Skill| TDA
+    SKILL -->|4a. 命中 Skill| SI
+    SKILL -->|4b. 未命中<br/>走 baseline| LC
+    TA -->|5. plan + skill_selected<br/>→ 注入 SKILL.md body| ORCH
+    ORCH -->|6. 3 轮 ReAct<br/>tools = 当前 Skill.tools| LC
+    LC -->|7. thinking 事件<br/>(实时计时)| SSE
+    LC --> AGNES
+    LC -.fallback.-> MINIMAX
     LC -.fallback.-> FALLBACK
-    QWEN -->|4. tool_calls| ORCH
-    ORCH -->|5. 并行 dispatch| L1
-    ORCH -->|5. 并行 dispatch| L2
-    ORCH -->|5. 并行 dispatch| L3
+    AGNES -->|8. tool_calls| ORCH
+    ORCH -->|9. invoke_tool<br/>tool_started/tool_completed| L1
+    ORCH --> L2
+    ORCH --> L3
     L1 --> PG
     L2 --> PG
     L2 --> LR
-    LR --> OLLAMA
     L3 --> PG
-    ORCH -->|6. SSE 事件流<br/>stage/content/complete| SSE
-    SSE -->|7. EventSource| UI
+    ORCH -->|10. SSE 事件<br/>含 7 个新事件| SSE
+    SSE -->|11. EventSource| UI
+    UI --> PSTEP
+    UI --> STIM
 ```
 
 ### 3.3 关键数据流
@@ -119,35 +144,137 @@ flowchart TB
 ```
 用户输入 → POST /queries → Orchestrator.process_query()
   │
-  ├─ 拼 messages（含 SYSTEM_PROMPT + 8 TOOL schema）
-  ├─ LLM.chat_raw(messages, tools=TOOLS, tool_choice="auto")
-  │   ↓
-  │  finish_reason=tool_calls → 解析 tool_calls 列表
+  ├─ Phase 0: Skill 选择（Hybrid 关键词 + LLM confirm）
+  │  ├─ skill_selecting SSE（正在分析意图）
+  │  ├─ match_skill_by_keywords() → ≤3 候选
+  │  ├─ LLM confirm 一次小调用（max_tokens=200, json_object）
+  │  ├─ skill_selected SSE（选了哪个 / null）
   │  │
-  │  ├─ dedup 检查（最近 2 个签名）
-  │  ├─ 跳过重复（synthetic tool result 反馈给 LLM）
-  │  ├─ 新 call 加入 pending
+  │  ├─ [命中 Skill]
+  │  │  ├─ plan SSE（stepper 4 步数据）
+  │  │  ├─ 注入 SKILL.md body + reference_paths（~38KB 参考文档）到 system prompt
+  │  │  ├─ tools = get_tools_by_names(skill.tools) ｜只有 Skill 专有工具
+  │  │  └─ 无缝降落到底层 ReAct 循环
   │  │
-  │  └─ 并行 asyncio.gather 调 _execute_tool
-  │       │
-  │       ├─ search_clues → SELECT ... FROM antiblack.clues
-  │       ├─ kg_query    → LightRAG.aquery_data()
-  │       ├─ aggregate_clue_stats → SELECT ... GROUP BY
-  │       └─ ...
+  │  └─ [未命中]
+  │     └─ tools = TOOLS（全 8 工具，baseline 路径）
   │
-  ├─ 工具结果 append 到 messages（role=tool）
-  ├─ 再次 LLM.chat_raw（生成自然语言报告）
-  │   ↓
-  │  finish_reason=stop → _chunk_text(response) 拆 SSE
-  │
-  └─ SSE 推送：stage / content / complete
+  ├─ Phase 1-3: ReAct 循环（最多 3 轮）
+  │  │
+  │  ├─ thinking SSE（开始/完成 + 实时计时）
+  │  ├─ LLM.chat_raw(messages, tools=tools_for_llm, tool_choice="auto")
+  │  │   ↓
+  │  │  finish_reason=tool_calls → 解析 tool_calls 列表
+  │  │  │
+  │  │  ├─ dedup 检查（最近 2 个签名）
+  │  │  ├─ 跳过重复（synthetic tool result 反馈给 LLM）
+  │  │  ├─ 新 call 加入 pending
+  │  │  │
+  │  │  └─ 并行 as_completed 调 invoke_tool()
+  │  │       │
+  │  │       ├─ tool_started SSE（蓝色脉冲 dot + tool 名）
+  │  │       ├─ 工具执行...
+  │  │       ├─ tool_completed SSE（实心 dot + 结果数 + 耗时 ms）
+  │  │       └─ [失败] tool_failed SSE（红色 dot + 错误信息）
+  │  │
+  │  ├─ 工具结果 append 到 messages（role=tool）
+  │  ├─ 再次 LLM.chat_raw（生成自然语言报告）
+  │  │   ↓
+  │  │  finish_reason=stop → _chunk_text(response) 拆 SSE
+  │  │
+  │  └─ SSE 推送：analyzing / reasoning / content / clue_list / complete
 ```
+
+### 3.4 全链路 SSE 事件清单
+
+| event.type | 含义 | UI 显示 |
+|---|---|---|
+| `skill_selecting` | 正在分析意图 | "正在分析意图…" + spinner |
+| `skill_selected` | Skill 选完（skill=null 也发） | "已选择 [xxx] Skill" / "未匹配到 Skill" |
+| `plan` | Plan 步骤列表 | PlanStepper 4 步圆点 |
+| `thinking` | LLM 内部推理 | step + 实时计时（"第 1 轮推理中…3.2s"） |
+| `tool_started` | Tool 开始执行 | 蓝色脉冲 dot + tool 名 |
+| `tool_completed` | Tool 执行完成 | 实心 dot + 结果数 + 耗时 |
+| `tool_failed` | Tool 执行失败 | 红色 dot + 错误信息 |
+| `stage` (parsing) | LLM 理解意图 | 折叠区 step |
+| `stage` (analyzing) | 生成报告 | step 更新 |
+| `retrieved` | 工具结果摘要 | 同 `tool_completed` |
+| `reasoning` | LLM think-tag 内容 | 折叠区子文本 |
+| `content` | 流式文本 chunk | typewriter Markdown |
+| `clue_list` | 线索卡片数据 | 卡片区渲染 |
+| `complete` | 流程结束 | 折叠推理区 + 保存会话 |
+| `error` | 异常 | 红色错误条 |
+| `heartbeat` | SSE 保活（30s） | 无 UI |
 
 ---
 
-## 4. 核心创新点 1-3：LLM 工具编排
+## 4. 核心创新点 1-4：Skill 抽象层 + LLM 工具编排
 
-### 4.1 创新点 1：三层工作流（Search / Drill / Aggregate）
+### 4.1 创新点 1：Skill 抽象层（新增 Phase 2/3）
+
+**问题**：原 orchestrator 只有 8 个平铺的工具，无论用户问"帮我溯源微信号"还是"近 7 天诈骗趋势"，LLM 看到的 prompt + tools 完全一样。**没有场景化、没有 plan 可见、没有动态能力扩展**。
+
+**方案**：三阶段改造：
+
+1. **Phase 1（agent/tools/ 注册层）**：@register_tool 装饰器，8 个 tool 按 MCP 风格独立 module
+2. **Phase 2（agent/skills/ 注册层）**：Skill dataclass + 关键词匹配 + LLM confirm
+3. **Phase 3（前端全链路透明）**：6 个新 SSE 事件 + PlanStepper + StatusTimeline
+
+**核心文件结构**：
+```
+agent/
+  __init__.py
+  tools/
+    __init__.py                    # 导入所有 tool 模块，触发注册
+    registry.py                    # @register_tool + get_tools_by_names + invoke_tool
+    search_clues.py 等 8 个 TBL     # @register_tool @每个类型 + handler 工厂
+  skills/
+    __init__.py
+    base.py                        # Skill dataclass
+    registry.py                    # @register_skill + load_all_skills + match_skill_by_keywords + get_skill_references
+    loader.py                      # YAML frontmatter 解析器
+    trace-actor/SKILL.md           # 溯源（4 tool, 4 step）
+    trend-analysis/SKILL.md        # 趋势（4 tool, 4 step）
+    slang-investigation/SKILL.md   # 黑话调查（3 tool, 4 step）
+    break-risk-intel/SKILL.md      # 风控分析（JDArmy/BREAK, 0 tool, 含 ~40 个参考文件）
+```
+
+**SKILL.md 格式（以 trace-actor 为例）**：
+```yaml
+---
+name: trace-actor
+description: "实体与团伙溯源：输入微信号/手机号/QQ 等通联标识，输出跨平台活动时间线..."
+triggers: ["溯源", "分析这个号", "footprint", "活动轨迹"]
+tools: ["get_actor_footprint", "kg_query", "search_clues", "get_clue_detail"]
+plan_template: ["定位目标实体", "拉取跨平台足迹", "挖掘关联网络", "输出溯源报告"]
+---
+```
+
+**触发流程（Phase 0 - Hybrid）**：
+1. `match_skill_by_keywords(query)` → 关键词 substring 预匹配，返回 ≤3 个候选
+2. 候选推 `skill_selecting` SSE（`candidates_found`）
+3. 一次 LLM confirm（max_tokens=200, json_object）选最终 Skill
+4. 推 `skill_selected` + `plan` SSE
+5. 注入 SKILL.md body + `reference_paths`（按需拼接参考文件）到 system prompt
+6. tools = `get_tools_by_names(skill.tools)` 降级到该 Skill 专属工具集
+7. 未命中 → 走 baseline（全 8 tool + 通用 prompt）
+
+**渐进式信息加载（Progressive Disclosure）**：
+- Baseline 路径：SYSTEM_PROMPT_CORE（~22 行，含"无追问硬约束"5 条规则）
+- Skill 路径：CORE + SKILL.md body（~30 行） + reference_paths（0-38KB）
+- reference_paths 懒加载 + 缓存（_REF_CACHE），首次命中才读磁盘
+
+**无追问硬约束（SYSTEM_PROMPT_CORE 新增）**：
+```
+# 无追问硬约束（极其重要）
+- 严禁向用户反问："请提供 X"、"你具体指什么"等任何要求补充信息的回复。
+- 严禁返回"信息不足"或"需要更多细节"作为最终输出。
+- 必须基于合理假设推进查询：当用户问题模糊时，自动选择最可能的解读方向。
+- 假设必须在最终报告中显式说明（"基于以下假设推进：xxx"）。
+- 缺数据时客观说明"未发现"或"暂无数据"，**不允许阻塞**。
+```
+
+### 4.2 创新点 2：三层工作流（Search / Drill / Aggregate）
 
 **痛点**：普通 LLM Agent 让模型自由调用工具——LLM 倾向于"用 search_clues 抽样估算趋势"（拿 20 条样本心算"流量作弊占多数"），这种"用样本推总体"是 LLM 的经典错误模式。
 
@@ -156,25 +283,29 @@ flowchart TB
 - 实体 / 团伙溯源类 → `get_actor_footprint`（L3）+ `kg_query`
 - 专项 / 细节类 → L1/L2 按需，禁止伪造聚合
 
-**核心代码片段**：
+**核心代码片段（旧版 DEPRECATED，参见 SYSTEM_PROMPT_CORE 当前版本）**：
 
 ```python
-# services/orchestrator.py:301-312 (SYSTEM_PROMPT 核心工作流)
-## 核心工作流
-- **宏观态势 / 趋势类**（如"分析近期风险态势"、"流量作弊占比"）：
-  必须调用 aggregate_clue_stats（L3 SQL GROUP BY）+ kg_query（L2）。
-  严禁用 search_clues 抽样估算趋势。
-- **实体 / 团伙溯源类**（如"分析这个微信号的轨迹"）：
-  必须调用 get_actor_footprint（L3）+ kg_query（L2）。
-- **专项 / 细节类**（如"查一下某条具体线索"）：
-  调用 L1/L2 工具按需，然后基于结果直接生成报告。
+# services/orchestrator.py:352-373 (SYSTEM_PROMPT_CORE 当前版本)
+SYSTEM_PROMPT_CORE = """你是 AntiBlack 黑灰产情报分析 Agent 的核心大脑。
+# 你的工作方式
+1. 理解意图 → 识别场景（溯源/趋势/黑话调查/通用检索）
+2. 调用工具 → 系统告诉当前激活的 Skill（如果有）
+3. 生成报告 → 严格 Markdown
+
+# 无追问硬约束
+- 严禁反向、严禁"信息不足"作为输出
+- 必须基于假设推进，假设必须显式声明
+- 缺数据说明"未发现"，不允许阻塞
+
+# Markdown 规范 + 输出原则
+"""
 ```
 
-**效果**：把"LLM 自由心证"变成"工具调用规约"，从 prompt 层消灭一类常见错。
+旧版 SYSTEM_PROMPT（38 行）保留为 `SYSTEM_PROMPT_V1_DEPRECATED` 用于 A/B 回退。
+场景工作流全部下沉到 SKILL.md（如 trace-actor 有"第一步必须调 get_actor_footprint"等规则）。
 
-**代码定位**：`services/orchestrator.py:301-312`
-
-### 4.2 创新点 2：SYNONYM_DICT 中文同义词后展开
+### 4.3 创新点 3（原 2）：SYNONYM_DICT 中文同义词后展开
 
 **痛点**：LLM 选词不准——用户说"微信号"，LLM 传 `query='微信号'`，但 raw_text 里更多是"微信""加微""卫星""vx"等变体，单 token ILIKE 召回 0。
 
@@ -222,7 +353,7 @@ def _expand_query_synonyms(tokens: list[str]) -> list[str]:
 
 **代码定位**：`services/orchestrator.py:25-62`
 
-### 4.3 创新点 3：entity_types JSONB @> 强信号锁
+### 4.4 创新点 4（原 3）：entity_types JSONB @> 强信号锁
 
 **痛点**：纯 keyword search 召回宽但精度低——`query='诈骗'` 召回 200 条但其中只有 5 条含 WECHAT 实体。
 
@@ -573,8 +704,8 @@ WHERE entity_list @> ANY(ARRAY['[{"entity_type":"WECHAT"}]']::jsonb[]);
 
 **为什么多 provider**：
 - 单一 provider 故障 → 整个 Agent 不可用
-- 不同 provider 优势不同：MiniMax 长文本/工具调用强、qwen 通用、ollama 本地
-- 链路：primary (MiniMax-M2.7) → fallback_1 (qwen3.6-flash) → ... → AllProvidersExhausted
+- 不同 provider 优势不同：Agnes 快速/agent 能力强、MiniMax 长文本/工具调用稳、qwen 通用
+- 链路：primary (Agnes-2.0-Flash) → fallback_1 (MiniMax-M2.7) → fallback_3 (qwen3.6-flash) → ...
 
 **ClassVar semaphore 的关键**：
 ```python
@@ -588,9 +719,9 @@ class LLMClient:
 - 如果每实例有独立 semaphore，**总并发 = 9 × 4 = 36**（超 provider 限额）
 - ClassVar 让所有实例**共享同一 semaphore**，实际并发 ≤ 4
 
-**多 provider 加载**：
+**多 provider 加载（当前 LLM_FALLBACK_2 支持 gap）**：
 ```python
-# models/clients/llm.py:101-123
+# models/clients/llm.py:101-124
 @staticmethod
 def _load_providers_from_env() -> List[Dict[str, Any]]:
     primary = {
@@ -604,7 +735,7 @@ def _load_providers_from_env() -> List[Dict[str, Any]]:
     for i in range(1, 5):  # 最多 4 个 fallback
         name = os.environ.get(f"LLM_FALLBACK_{i}_NAME")
         if not name:
-            break
+            continue  # 支持 gap（如 F2 保留 F3 仍加载）
         fallbacks.append({...})
     return [p for p in [primary] + fallbacks if p.get("api_key") and p.get("base_url")]
 ```
@@ -646,7 +777,7 @@ result = await self._rag.aquery_data(
 
 ---
 
-## 8. SSE 协议规范
+## 8. SSE 协议规范（更新含 7 个 Skill/推理事件）
 
 ### 8.1 端点与时序
 
@@ -655,8 +786,9 @@ sequenceDiagram
     participant C as Vue Client
     participant API as POST /queries
     participant BG as background asyncio task
+    participant SKL as Skill Registry
     participant LLM as LLMClient
-    participant T as Tools
+    participant T as Tools (invoke_tool)
     participant S as SSE /stream
 
     C->>API: 1. POST {query_text}
@@ -665,24 +797,32 @@ sequenceDiagram
     C->>S: 4. GET /{id}/stream
     S-->>C: 5. data: {type:heartbeat} (every 30s)
 
-    BG->>LLM: 6. chat(messages, tools)
-    LLM-->>BG: 7. tool_calls[]
-    BG->>S: 8. data: {type:stage, stage:"tool_kickoff", tool_name:"search_clues"}
-    S-->>C: 9. 实时推送
+    BG->>SKL: 6. Phase 0: skill_selecting
+    SKL-->>BG: 7. candidates
+    BG->>S: 7a. data: {type:stage, stage:skill_selecting}
+    BG->>LLM: 7b. LLM confirm (max_tokens=200)
+    LLM-->>BG: 7c. chosen skill
+    BG->>S: 8. data: {type:stage, stage:skill_selected}
 
-    BG->>T: 10. parallel dispatch
-    T-->>BG: 11. results
-    BG->>S: 12. data: {type:content_or_stage, content:"summary"}
-    S-->>C: 13. 实时推送
+    alt skill hit
+        BG->>S: 9a. data: {type:stage, stage:plan, data:{steps: [...]}}
+    end
 
-    BG->>LLM: 14. chat(messages + tool_results)
-    LLM-->>BG: 15. response_text
-    BG->>S: 16. data: {type:content, content:"<markdown>"}
-    S-->>C: 17. 流式逐字推送
+    Note over BG,LLM: === ReAct Loop (max 3 iterations) ===
 
-    BG->>S: 18. data: {type:complete, progress:100}
-    S-->>C: 19. 关闭
-    C->>S: 20. EventSource.close()
+    BG->>S: 10. data: {type:stage, stage:thinking, data:{iteration:1, status:started}}
+    BG->>LLM: 11. chat(messages, tools)
+    LLM-->>BG: 12. tool_calls[]
+    BG->>S: 13. data: {type:stage, stage:thinking, data:{iteration:1, status:completed, elapsed_ms:3200}}
+    BG->>S: 14. data: {type:stage, stage:tool_started, data:{tool_name:"search_clues", status:running}}
+    BG->>T: 15. invoke_tool(...)
+    T-->>BG: 16. result
+    BG->>S: 17. data: {type:stage, stage:tool_completed, data:{tool_name:"search_clues", status:done, result_count:8, elapsed_ms:1200}}
+    BG->>LLM: 18. chat(messages + tool_results)
+    LLM-->>BG: 19. response_text
+    BG->>S: 20. data: {type:content, content:"<markdown chunk>"}
+    BG->>S: 21. data: {type:complete, progress:100}
+    C->>S: 22. EventSource.close()
 ```
 
 ### 8.2 事件类型完整列表
@@ -690,12 +830,20 @@ sequenceDiagram
 | 事件 | 触发 | 关键字段 |
 |------|------|---------|
 | `heartbeat` | 每 30s 无新事件 | (no payload) |
+| `skill_selecting` | 开始 Phase 0 | `data: {stage, candidates_count}` |
+| `skill_selected` | Skill 确认 | `data: {skill, description}` 或 `{skill: null}` |
+| `plan` | Skill 激活时 | `data: {skill, steps: [...]}` |
+| `thinking (started)` | 每轮 LLM 调用前 | `data: {iteration, status: started}` |
+| `thinking (completed)` | 每轮 LLM 完成后 | `data: {iteration, status: completed, elapsed_ms}` |
+| `tool_started` | invoke_tool 前 | `data: {tool_name, iteration, status: running}` |
+| `tool_completed` | invoke_tool 后 | `data: {tool_name, iteration, status: done, result_count, elapsed_ms}` |
+| `tool_failed` | invoke_tool 异常 | `data: {tool_name, iteration, status: failed, error}` |
+| `stage: stage` | 工具 kickoff（旧版） | `tool_name` |
+| `stage: retrieved` | 工具完成（旧版） | `tool_name`, `content` |
 | `stage: parsing` | Orchestrator 启动 | `progress: 10` |
-| `stage: stage` | 工具 kickoff | `content: "正在调用 X..."`, `tool_name` |
-| `stage: retrieved` | 工具完成 | `content: "工具执行完成，X 条结果"`, `tool_name` |
 | `stage: analyzing` | 开始生成报告 | `progress: 60` |
 | `reasoning` | LLM `<think>` 块 | `content` |
-| `content` | 流式 LLM 输出 | `content: "<markdown chunk>"` |
+| `content` | 流式 LLM 输出 | `content` |
 | `clue_list` | 有结构化线索 | `data: {items: [...]}` |
 | `results` | 工具结果汇总 | `progress: 90` |
 | `complete` | 终止 | `progress: 100` |
@@ -704,19 +852,24 @@ sequenceDiagram
 ### 8.3 前端消费约定
 
 ```javascript
-// frontend/src/views/Query.vue:214-225 (SSE onmessage)
+// frontend/src/views/Query.vue:226-234 (SSE onmessage)
 eventSource.onmessage = (event) => {
   const data = JSON.parse(event.data)
   handleSSEEvent(data)
 }
 
-// 按 type 分发
-switch (data.type) {
-  case 'content':  // 流式追加到 assistant 消息
-  case 'stage':    // 显示在 reasoning block
-  case 'complete': // 标记 isProcessing=false
-  case 'clue_list': // 渲染 ClueResultCard 列表
-}
+// handleSSEEvent 按 event.stage 分发（全 18 种类型）
+// 参见 frontend/src/views/Query.vue:255-385
+//
+// 关键分支：
+// - thinking status=started → 推一条 "LLM 推理中…" step
+// - thinking status=completed → 更新对应 step 的 elapsed_ms + iteration
+// - tool_started/tool_completed/tool_failed → 读取 data.tool_name 做去重
+// - plan → 渲染 PlanStepper 组件（4 步圆点）
+// - skill_selecting/skill_selected → 显示状态文本
+// - content → 流式追加到 assistant 消息（Markdown 实时渲染）
+// - complete → 保存 reasoning 到 message，触发 saveConversation()
+// - stage/progress（旧版）→ 更新 currentProgress 兼容
 ```
 
 ---
@@ -783,39 +936,74 @@ switch (data.type) {
 - 缺重试策略（什么错该重试、几次）
 - 缺降级（关键工具失败时切换到 fallback 数据源）
 
-### 10.6 Token 预算硬约束
+### 10.6 跨会话 Skill 记忆
+
+当前 Skill 选择是 per-query 的（没有 cross-session user preference）。
+多条关于同一 Skill 的查询浪费在重复的 LLM confirm + reference_paths 加载。
+解决方向：Session 级 SkillContext 对象持有已激活 Skill 缓存。
+
+### 10.7 Token 预算硬约束
 
 `_MAX_CONCURRENT=4` 限并发，但不限制单次 LLM 调用的 max_tokens：
 - 风险：单次 LLM 4 轮工具 + 1 轮总结 = 5×max_tokens = 10K tokens
 - 解决方向：全局 token 预算 daemon-wide counter，接近预算时拒绝新查询
 
-### 10.7 图谱自动更新
+### 10.8 图谱自动更新
 
 LightRAG 现在需要手动 `insert`：
 - 解决方向：clue 写入后异步触发 LightRAG insert（用 Kafka 异步解耦）
 
 ---
 
-## 11. 附录：8 TOOL 完整参数表
+## 11. 附录：4 Skill 完整配置表
 
-| Tool 名 | Layer | 必填 | 可选参数 | 返回 |
-|--------|-------|------|---------|------|
-| `search_clues` | L1 | `query` (中文) | `entity_types[]`(WECHAT/PHONE/QQ/ACCOUNT), `time_range`{amount,unit}, `risk_types[]`(enum), `platforms[]`, `limit`(50) | 线索列表（raw_text/cleaned_text/entity_list/slang_mappings/...） |
-| `get_recent_clues` | L1 | (无) | `hours`(24), `risk_label_level1`, `platform`, `limit`(20) | 最近 N 小时线索 |
-| `search_entities` | L1 | `entity_name` | `entity_type`, `limit`(20) | entity 表行 |
-| `search_slang` | L1 | `slang_term` | `limit`(20) | slang_mappings 行（2-gram CJK 滑动窗口） |
-| `get_clue_detail` | L2 | `clue_id` | (无) | 单条线索全字段 |
-| `kg_query` | L2 | `query` | `mode`(local/global/hybrid/mix/naive, default hybrid), `limit`(10) | LightRAG 结构化 {entities, relationships, chunks, references} |
-| `aggregate_clue_stats` | L3 | (无) | `time_range`, `group_by`(risk_type/platform/channel/risk_platform, default risk_platform), `risk_types[]`, `platforms[]` | SQL GROUP BY 结果 |
-| `get_actor_footprint` | L3 | `entity_value` | `entity_type`, `limit`(50) | 实体跨平台活动时间线 |
+### 11.1 内置 Skill
+
+| Skill | 触发关键词 | Tool (数量) | Plan 步骤 | reference_paths |
+|---|---|---|---|---|
+| `trace-actor` | 溯源, footprint, 活动轨迹... | `get_actor_footprint`, `kg_query`, `search_clues`, `get_clue_detail` (4) | 4 步 | 无 |
+| `trend-analysis` | 趋势, 大盘, 增长, top... | `aggregate_clue_stats`, `kg_query`, `search_slang`, `search_clues` (4) | 4 步 | 无 |
+| `slang-investigation` | 黑话, 啥意思, chuhao... | `search_slang`, `search_clues`, `kg_query` (3) | 4 步 | 无 |
+| `break-risk-intel` | 风控, fraud, BREAK... | 无 (0) | 4 步 | references/*, knowledge/*, examples/*, templates/* |
+
+### 11.2 扩展 Skill 流程
+
+1. 创建 `agent/skills/your-skill/SKILL.md`
+2. 定义 `name`, `description`, `triggers`, `tools`, `plan_template`, `reference_paths`
+3. 重启或重新 import `agent.skills.registry` → 自动注册
+4. 如果新 Skill 需要注册新 tool：
+   - 创建 `agent/tools/your_tool.py`
+   - 用 `@register_tool(name, description, parameters)` 装饰
+   - 实现 handler factory `def your_tool(orch): async def run(args): ...`
+   - SKILL.md 的 `tools` 列表加 tool 名字
+   - `agent/tools/__init__.py` 加 `import`
+
+### 11.3 @register_tool 装饰器规范
+
+```python
+# agent/tools/registry.py
+def register_tool(name, description, parameters):
+    """Decorator returning the factory unchanged.
+    factory signature: Callable[[Orchestrator], Callable[..., Awaitable[Any]]]
+    """
+    ...
+
+def get_tools_by_names(names: list[str]) -> list[dict]:
+    """Return OpenAI tool schemas for the named tools.
+    Unknown names silently skipped (with a warning log)."""
+
+async def invoke_tool(name, orchestrator, **kwargs):
+    """Dispatch to the bound handler. Raises ValueError on unknown name."""
+```
 
 ---
 
 ## 12. 收尾：本系统的本质
 
-**AntiBlack Agent 不是"调用 LLM 的搜索框"，而是"受工程约束的对话式情报员"**：
+**AntiBlack Agent 不是"调用 LLM 的搜索框"，而是"受工程约束的场景化情报分析 Agent"**：
 
-- LLM 自由发挥 → 不可控、不可信
+- Skill 层将场景知识显式编码 → 用户看到"我正在溯源/趋势/黑话调查"，不是"在调 8 个工具"
+- Plan 步骤让用户看到 Agent 的"思路" → "我的计划 1/2/3/4"，不是黑盒
 - LLM 受三层工作流约束 → 行为可预测
 - LLM 受 synonym 字典补偿 → 不因选词不准崩溃
 - LLM 受 entity_types 强信号锁 → 召回精确而非泛
@@ -823,6 +1011,7 @@ LightRAG 现在需要手动 `insert`：
 - LLM 受 MAX_TOOL_ITERATIONS 软截断 → 不会失控循环
 - LLM 受 dedup 约束 → 不会重复调
 - LLM 受 token cap 保护 → 不会 DoS
-- LLM 输出完整可观测 → 用户信任
+- LLM 受"无追问硬约束" → 不反问用户，基于合理假设推进
+- LLM 输出完整可观测 → 用户信任（thinking 计时、tool 脉冲、plan 步骤条）
 
-这套"工程约束 + LLM 编排"的组合，是本系统区别于"普通 LLM Agent"的核心。
+这套"Skill 场景驱动 + 工程约束 + LLM 编排 + 全链路可观测"的组合，是本系统区别于"普通 LLM Agent"的核心。
