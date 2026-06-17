@@ -1,5 +1,5 @@
 ---
-name: trace_actor
+name: trace-actor
 description: "实体与团伙溯源：输入微信号/手机号/QQ 等通联标识，输出跨平台活动时间线、风险历史与上下游关联网络。"
 triggers: ["溯源", "分析这个号", "footprint", "trazer", "活动轨迹", "历史记录", "团伙", "上下游"]
 tools: ["get_actor_footprint", "kg_query", "search_clues", "get_clue_detail"]

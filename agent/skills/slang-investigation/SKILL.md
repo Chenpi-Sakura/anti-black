@@ -1,5 +1,5 @@
 ---
-name: slang_investigation
+name: slang-investigation
 description: "黑话与暗语调查：输入黑话/暗语/Emoji/TODO 等模糊标识，输出词典释义、分类场景、使用分布与相关线索。"
 triggers: ["黑话", "暗语", "啥意思", "什么意思", "啥", "chuhao", "缩写", "emoji", "黑产术语"]
 tools: ["search_slang", "search_clues", "kg_query"]

@@ -1,5 +1,5 @@
 ---
-name: trend_analysis
+name: trend-analysis
 description: "宏观态势与趋势分析：按风险类型/平台维度，输出统计分布、增长趋势、核心实体与专属黑话。"
 triggers: ["趋势", "大盘", "全面分析", "最近", "近期", "增长", "分布", "top", "TOP", "排行", "热榜"]
 tools: ["aggregate_clue_stats", "kg_query", "search_slang", "search_clues"]
