@@ -111,7 +111,7 @@ class LLMClient:
         for i in range(1, 5):  # support up to 4 fallbacks
             name = os.environ.get(f"LLM_FALLBACK_{i}_NAME")
             if not name:
-                break
+                continue  # allow gaps (e.g. Fallback 2 reserved, Fallback 3 active)
             fallbacks.append({
                 "name":     name,
                 "api_key":  os.environ.get(f"LLM_FALLBACK_{i}_API_KEY"),
