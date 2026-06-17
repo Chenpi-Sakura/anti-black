@@ -2,7 +2,7 @@
   <div class="app-container">
     <header class="app-header">
       <div class="header-left">
-        <span class="logo">::</span>
+        <span class="logo" v-html="shieldSvg" />
         <h1 class="system-title">黑灰产情报分析 Agent</h1>
       </div>
 
@@ -46,6 +46,9 @@ import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from './stores/app'
 import { systemApi } from './api'
 import { Monitor, Search, Document, DataLine, Edit } from '@element-plus/icons-vue'
+
+// 蓝色盾牌 + 白色对勾 — Element Plus 没有 Shield,inline SVG 最稳
+const shieldSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="28" height="28"><path d="M16 2 L28 6 L28 14 C28 22 22 28 16 30 C10 28 4 22 4 14 L4 6 Z" fill="#1d39c4" stroke="#1d39c4" stroke-width="1.5" stroke-linejoin="round"/><path d="M11 16 L14.5 19.5 L21 13" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
 const store = useAppStore()
 
@@ -101,10 +104,12 @@ onMounted(async () => {
 }
 
 .logo {
-  font-size: var(--font-size-xxl);
-  color: var(--color-primary);
-  font-family: var(--font-serif);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
 }
+.logo :deep(svg) { display: block; }
 
 .system-title {
   font-size: var(--font-size-lg);
