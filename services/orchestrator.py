@@ -7,7 +7,15 @@ import json
 import logging
 import re
 import asyncio
+import time as _time
 from typing import Any, Optional
+
+from agent.tools import get_tools_by_names, invoke_tool
+from agent.skills.registry import (
+    match_skill_by_keywords,
+    get_skill,
+    get_skill_body,
+)
 
 from openai import AsyncOpenAI
 
@@ -298,7 +306,7 @@ TOOLS = [
     }
 ]
 
-SYSTEM_PROMPT = """你是一个黑灰产情报分析专家（Orchestrator Agent 大脑），负责自然语言理解、任务编排、调用工具检索数据，并生成专业的态势分析报告。
+SYSTEM_PROMPT_V1_DEPRECATED = """你是一个黑灰产情报分析专家（Orchestrator Agent 大脑），负责自然语言理解、任务编排、调用工具检索数据，并生成专业的态势分析报告。
 
 【核心工作流：根据意图选择模式】
 1. 宏观态势与趋势分析（例如"近期XX有什么趋势"、"大盘情况"、"全面分析XX"）：
@@ -336,6 +344,39 @@ SYSTEM_PROMPT = """你是一个黑灰产情报分析专家（Orchestrator Agent 
 六、实体活动时间线（仅限溯源场景）：使用时间线列表格式，展示实体（get_actor_footprint）的历史动作。
 七、综合研判：以安全专家视角总结核心载体、手法演变及重点防范场景。
 """
+
+# SYSTEM_PROMPT_CORE replaces SYSTEM_PROMPT_V1_DEPRECATED. The old version
+# is retained as a fallback for A/B switching during the 4-week dual-track
+# migration and will be removed in a future commit.
+SYSTEM_PROMPT_CORE = """你是 AntiBlack 黑灰产情报分析 Agent 的核心大脑。
+
+# 你的工作方式
+1. **理解意图**：分析用户问题，识别属于哪个场景（溯源 / 趋势 / 黑话调查 / 通用检索）。
+2. **调用工具**：每个场景有专属的工具集和强制工作流。系统会告诉你当前激活的 Skill（如果有）。
+3. **生成报告**：严格按规范的结构化 Markdown 输出。
+
+# 无追问硬约束（极其重要）
+- 严禁向用户反问："请提供 X"、"你具体指什么"等任何要求补充信息的回复。
+- 严禁返回"信息不足"或"需要更多细节"作为最终输出。
+- 必须基于合理假设推进查询：当用户问题模糊时（如"分析一下"），自动选择最可能的解读方向。
+- 假设必须在最终报告中显式说明（"基于以下假设推进：xxx"），让用户能看到你的判断依据。
+- 缺数据时客观说明"未发现"或"暂无数据"，**不允许阻塞**。
+
+# Markdown 渲染规范（不可违反）
+- 区块间保留空行：标题/表格/列表/分割线上下必须有 `\\n\\n`
+- 表格格式严格：表头分隔行 `|---|---|` 必须有，每行 `\\n` 结尾
+- 列表每项独占一行
+- 关系链用 `├─→ / └─→` 树状图
+
+# 输出原则
+- 严禁捏造：没有的工具结果不能编造。无数据时客观说明"未发现"。
+- 引用工具结果：所有数字必须来自工具返回，不要凭印象。
+- 控制在 3 轮工具调用内。
+- 每次回复必须包含实质性分析内容（不能是空回复或"已收到"）。
+"""
+
+# Active prompt — swap to SYSTEM_PROMPT_V1_DEPRECATED if needed during dual-track.
+SYSTEM_PROMPT = SYSTEM_PROMPT_CORE
 
 def _count_tool_result(result: Any) -> int:
     """Return a human-meaningful count for a tool's return value.
@@ -533,17 +574,91 @@ class Orchestrator:
 
         await self._stream_progress(query_id, "parsing", "正在理解用户意图...", 10)
 
-        # 构建消息历史
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT}
-        ]
+        # ============================
+        # Phase 0: Skill 选择（Hybrid 关键词 + LLM confirm）
+        # ============================
+        await self._stream_progress(query_id, "skill_selecting", "正在分析意图…选择 Skill", None, data={
+            "stage": "analyzing_intent",
+            "candidates_count": 0,
+        })
 
-        # 添加对话历史（如果有）
-        for msg in context:
-            messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+        candidates = match_skill_by_keywords(query_text)
+        active_skill = None
 
-        # 添加用户查询
-        messages.append({"role": "user", "content": query_text})
+        if candidates:
+            await self._stream_progress(query_id, "skill_selecting", None, None, data={
+                "stage": "candidates_found",
+                "candidates_count": len(candidates),
+                "candidates": [{"name": s.name, "description": s.description} for s in candidates[:3]],
+            })
+
+            # LLM confirm — 一次小调用确定最匹配的 Skill
+            candidate_lines = "\n".join(
+                f"- {s.name}: {s.description}" for s in candidates
+            )
+            try:
+                confirm = await self.llm.chat_raw(messages=[{
+                    "role": "user",
+                    "content": (
+                        f"用户问题：{query_text}\n\n"
+                        f"候选 Skill：\n{candidate_lines}\n\n"
+                        f"请从候选中选最匹配的一个，回 JSON："
+                        f'{{"skill": "name_or_null", "reason": "..."}}\n'
+                        f"规则：必须从候选中选一个（最接近的），"
+                        f"除非所有候选都明显不相关才回 null。"
+                    ),
+                }], max_tokens=200, temperature=0.0,
+                    response_format={"type": "json_object"})
+                chosen = json.loads(confirm.choices[0].message.content)
+                skill_name = chosen.get("skill")
+                if skill_name and get_skill(skill_name):
+                    active_skill = get_skill(skill_name)
+            except Exception:
+                pass  # fall through to baseline
+
+        if active_skill:
+            await self._stream_progress(query_id, "skill_selected", None, 15, data={
+                "skill": active_skill.name,
+                "description": active_skill.description,
+            })
+        else:
+            await self._stream_progress(query_id, "skill_selected", None, 15, data={"skill": None})
+
+        # ============================
+        # 构建 messages + tools
+        # ============================
+        if active_skill:
+            plan_str = "\n".join(
+                f"{i+1}. {step}" for i, step in enumerate(active_skill.plan_template)
+            )
+            skill_body = get_skill_body(active_skill.name) or ""
+            messages = [
+                {"role": "system",
+                 "content": SYSTEM_PROMPT + "\n\n# 当前激活的 Skill\n" + skill_body},
+                {"role": "user",
+                 "content": (
+                     f"我的计划：\n{plan_str}\n\n"
+                     f"请按上述计划逐步执行。先完成步骤 1，"
+                     f"根据结果决定步骤 2 是否继续。\n\n"
+                     f"用户问题：{query_text}"
+                 )},
+            ]
+            # Plan stepper
+            await self._stream_progress(query_id, "plan", None, 20, data={
+                "skill": active_skill.name,
+                "steps": active_skill.plan_template,
+            })
+            tools_for_llm = get_tools_by_names(active_skill.tools)
+        else:
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": query_text},
+            ]
+            # Add conversation history if any
+            for msg in context:
+                messages.append({"role": msg.get("role", "user"),
+                                 "content": msg.get("content", "")})
+            tools_for_llm = TOOLS
 
         # LLM 对话循环（支持工具调用）
         assistant_message = None
@@ -557,15 +672,30 @@ class Orchestrator:
             try:
                 iteration += 1
 
+                # === 推 SSE: thinking（开始） ===
+                thinking_start = _time.time()
+                await self._stream_progress(query_id, "thinking", None, None, data={
+                    "iteration": iteration,
+                    "status": "started",
+                })
+
                 # 调用 unified LLM client (带工具;多 provider fallback 链)
                 response = await self.llm.chat_raw(
                     messages=messages,
-                    tools=TOOLS,
+                    tools=tools_for_llm,
                     tool_choice="auto",
                     max_tokens=2048,
                     temperature=0.3,
                     extra_body={"reasoning_effort": "low"},
                 )
+
+                # === 推 SSE: thinking（完成） ===
+                thinking_elapsed = int((_time.time() - thinking_start) * 1000)
+                await self._stream_progress(query_id, "thinking", None, None, data={
+                    "iteration": iteration,
+                    "status": "completed",
+                    "elapsed_ms": thinking_elapsed,
+                })
 
                 choice = response.choices[0]
                 finish_reason = choice.finish_reason
@@ -612,26 +742,51 @@ class Orchestrator:
                         pending_calls.append((tool_call, tool_name, tool_args))
 
                     if pending_calls:
-                        # 并行发起所有工具调用
-                        async def _run_one(tc, tn, ta):
-                            await self._stream_progress(query_id, "stage", f"正在调用 {tn}...", 30, tool_name=tn)
-                            return tc, tn, ta, await self._execute_tool(tn, ta)
+                        # 并行发起所有工具调用 — 每个 tool 有独立的 progress 事件
+                        async def _run_one_with_progress(tc, tn, ta, qid, step_index):
+                            start = _time.time()
+                            # === 推 SSE: tool_started ===
+                            await self._stream_progress(qid, "tool_started", None, None, data={
+                                "tool_name": tn,
+                                "iteration": step_index,
+                                "status": "running",
+                            })
+                            try:
+                                result = await invoke_tool(tn, self, **ta)
+                                elapsed_ms = int((_time.time() - start) * 1000)
+                                # === 推 SSE: tool_completed ===
+                                await self._stream_progress(qid, "tool_completed", None, None, data={
+                                    "tool_name": tn,
+                                    "iteration": step_index,
+                                    "status": "done",
+                                    "result_count": _count_tool_result(result),
+                                    "elapsed_ms": elapsed_ms,
+                                })
+                                return (tc.id, tn, result)
+                            except Exception as e:
+                                await self._stream_progress(qid, "tool_failed", None, None, data={
+                                    "tool_name": tn,
+                                    "iteration": step_index,
+                                    "status": "failed",
+                                    "error": str(e),
+                                })
+                                return (tc.id, tn, {"error": str(e)})
 
-                        tasks = [_run_one(tc, tn, ta) for tc, tn, ta in pending_calls]
+                        tasks = [_run_one_with_progress(tc, tn, ta, query_id, iteration)
+                                 for tc, tn, ta in pending_calls]
 
                         # 逐条处理完成的结果（as_completed 按完成顺序 yield）
                         for coro in asyncio.as_completed(tasks):
-                            tc, tn, ta, result = await coro
+                            tc_id, tn, result = await coro
 
                             # 将工具结果添加回消息
                             messages.append({
                                 "role": "tool",
-                                "tool_call_id": tc.id,
+                                "tool_call_id": tc_id,
                                 "content": json.dumps(result, ensure_ascii=False, default=str)
                             })
                             tool_calls_executed.append({
                                 "name": tn,
-                                "args": ta,
                                 "result": result,
                                 "result_count": _count_tool_result(result),
                             })
@@ -639,8 +794,7 @@ class Orchestrator:
                             summary = _format_tool_result_summary(result)
                             await self._stream_progress(query_id, "retrieved", f"工具执行完成，{summary}", 50, tool_name=tn)
 
-                    # 所有工俱全部完成 → 让 LLM 思考下一步
-                    # （不额外发 SSE，工具结果已经在 retrieved 事件中显示）
+                    # 所有工具全部完成 → 让 LLM 思考下一步
                     continue
 
                 elif finish_reason == "stop" or finish_reason == "completed":
