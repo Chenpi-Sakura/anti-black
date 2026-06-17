@@ -15,6 +15,7 @@ from agent.skills.registry import (
     match_skill_by_keywords,
     get_skill,
     get_skill_body,
+    get_skill_references,
 )
 
 from openai import AsyncOpenAI

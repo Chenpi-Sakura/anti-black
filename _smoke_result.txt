@@ -1,0 +1,9 @@
+Loaded 3 skills:
+  slang_investigation: (3 tools, 4 steps)
+  trace_actor: (4 tools, 4 steps)
+  trend_analysis: (4 tools, 4 steps)
+  [FAIL] help me trace wechat abc123    -> []
+  [FAIL] recent 7 days fraud trend      -> []
+  [PASS] chuhao what does it mean       -> ['slang_investigation']
+  [PASS] weather today                  -> []
+  PASS all tests

@@ -7,8 +7,11 @@ encodes:
   - tools / plan_template           (for tool scoping and plan-then-execute)
   - body text                       (the "操作指南" — injected into system
                                      prompt when the skill is activated)
+  - reference_paths                 (glob patterns for reference files to
+                                     concatenate into the system prompt)
 
 Skills are loaded once at startup (frontmatter parsed, body cached in mem).
 Activation only happens if keywords + LLM confirm match; body is lazy-loaded
-and only appended to the system prompt when the skill fires.
+and only appended to the system prompt when the skill fires. Reference files
+are lazy-loaded on the first request per skill.
 """

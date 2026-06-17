@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 _SKILLS: Dict[str, Skill] = {}
 _SKILL_BODIES: Dict[str, str] = {}
 
+# Cached reference file content (populated lazily on first request)
+_REF_CACHE: Dict[str, str] = {}
+
 
 def register_skill(skill: Skill, body: str) -> None:
     """Register a single skill (used by load_all_skills and tests)."""
@@ -58,6 +61,7 @@ def load_all_skills(base: Optional[str] = None) -> None:
                 triggers=meta.get("triggers", []),
                 plan_template=meta.get("plan_template", []),
                 requires=meta.get("requires", []),
+                reference_paths=meta.get("reference_paths", []),
                 version=meta.get("version", "1.0"),
                 enabled=meta.get("enabled", True),
             )
@@ -94,6 +98,43 @@ def get_skill(name: str) -> Optional[Skill]:
 def get_skill_body(name: str) -> Optional[str]:
     """Return the cached markdown body for a skill (lazy-loaded at startup)."""
     return _SKILL_BODIES.get(name)
+
+
+
+
+def get_skill_references(name: str) -> Optional[str]:
+    """Load and concatenate reference files declared in a skill's reference_paths.
+
+    Results are cached in _REF_CACHE (lazy-load on first call per skill).
+    Paths are glob patterns relative to the skill's directory.
+    Returns None if no reference_paths or no files matched.
+    """
+    if name in _REF_CACHE:
+        return _REF_CACHE.get(name)
+
+    skill = _SKILLS.get(name)
+    if not skill or not skill.reference_paths:
+        _REF_CACHE[name] = None
+        return None
+
+    skill_dir = pathlib.Path(skill.skill_md_path).parent
+    chunks = []
+    for pattern in skill.reference_paths:
+        for fpath in sorted(skill_dir.glob(pattern)):
+            try:
+                text = fpath.read_text(encoding="utf-8")
+                chunks.append(f"=== {fpath.name} ===")
+                chunks.append(text)
+            except (OSError, UnicodeDecodeError) as e:
+                logger.warning(f"Failed to read reference {fpath}: {e}")
+
+    if not chunks:
+        _REF_CACHE[name] = None
+        return None
+
+    result = "\n\n".join(chunks)
+    _REF_CACHE[name] = result
+    return result
 
 
 def list_all_skills() -> List[Skill]:

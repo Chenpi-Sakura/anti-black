@@ -620,6 +620,10 @@ pytest tests/ -v -m "not e2e"
 - [ahocorasick](https://github.com/WojciechMula/pyahocorasick) — AC 自动机
 - [highlight.js](https://highlightjs.org/) — 代码高亮
 
+## 致谢
+
+- **[JDArmy/BREAK](https://github.com/JDArmy/BREAK)** — 业务风险分类框架，为本系统的风险识别与控制分析提供体系化参考。详见 [`agent/skills/break-risk-intel/`](agent/skills/break-risk-intel/) 目录。
+
 ---
 
 **维护者**：AntiBlack Team

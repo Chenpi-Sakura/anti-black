@@ -27,6 +27,9 @@ class Skill:
         plan_template: Ordered list of plan-step labels (Chinese) shown
                      to the user as the "我的计划 (N 步)" stepper.
         requires:    List of other skill names that must be loaded first.
+        reference_paths: Glob patterns for reference files to load and inject
+                     into the system prompt when the skill is activated. Paths
+                     are relative to the skill's own directory.
         version:     Semver string for cache busting.
         enabled:     False temporarily disables the skill without deleting
                      its SKILL.md.
@@ -38,5 +41,6 @@ class Skill:
     triggers: List[str] = field(default_factory=list)
     plan_template: List[str] = field(default_factory=list)
     requires: List[str] = field(default_factory=list)
+    reference_paths: List[str] = field(default_factory=list)
     version: str = "1.0"
     enabled: bool = True
